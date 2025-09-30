@@ -75,6 +75,7 @@ log "Установка зависимостей Python..."
 cd $PROJECT_DIR
 sudo -u $SERVICE_USER python3 -m venv venv
 sudo -u $SERVICE_USER $PROJECT_DIR/venv/bin/pip install --upgrade pip
+sudo -u $SERVICE_USER $PROJECT_DIR/venv/bin/pip install --upgrade setuptools wheel
 sudo -u $SERVICE_USER $PROJECT_DIR/venv/bin/pip install -r requirements.txt
 
 log "Настройка переменных окружения..."
