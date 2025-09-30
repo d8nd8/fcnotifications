@@ -1,0 +1,207 @@
+{% extends "unfold/layouts/base_simple.html" %}
+{% load i18n unfold static %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block title %}
+    {% trans 'Dashboard' %} | {{ site_title|default:_('Django site admin') }}
+{% endblock %}
+
+{% block branding %}
+    <div class="flex items-center">
+        <span class="text-2xl mr-2">📱</span>
+        <span class="text-xl font-bold">FC Phones</span>
+    </div>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto py-8">
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+            {{ title|default:"📱 FC Phones - Панель управления" }}
+        </h1>
+        <p class="text-gray-600 dark:text-gray-400">
+            {{ subtitle|default:"Сервис алертов для мобильных устройств" }}
+        </p>
+    </div>
+
+    <!-- Статистические карточки -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <!-- Устройства -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-blue-500 rounded-md flex items-center justify-center">
+                        <span class="text-white text-sm">📱</span>
+                    </div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Всего устройств</p>
+                    <p class="text-2xl font-semibold text-gray-900 dark:text-white">{{ devices_total|default:0 }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Онлайн устройства -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-green-500 rounded-md flex items-center justify-center">
+                        <span class="text-white text-sm">🟢</span>
+                    </div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Онлайн</p>
+                    <p class="text-2xl font-semibold text-gray-900 dark:text-white">{{ devices_online|default:0 }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Офлайн устройства -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-red-500 rounded-md flex items-center justify-center">
+                        <span class="text-white text-sm">🔴</span>
+                    </div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Офлайн</p>
+                    <p class="text-2xl font-semibold text-gray-900 dark:text-white">{{ devices_offline|default:0 }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Сообщения сегодня -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-purple-500 rounded-md flex items-center justify-center">
+                        <span class="text-white text-sm">💬</span>
+                    </div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Сообщения сегодня</p>
+                    <p class="text-2xl font-semibold text-gray-900 dark:text-white">{{ messages_today|default:0 }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Дополнительная статистика -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <!-- Сообщения за неделю -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Активность за неделю</h3>
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-indigo-500 rounded-md flex items-center justify-center">
+                        <span class="text-white text-sm">📊</span>
+                    </div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Сообщений за неделю</p>
+                    <p class="text-2xl font-semibold text-gray-900 dark:text-white">{{ messages_week|default:0 }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Низкий заряд -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Состояние батареи</h3>
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="w-8 h-8 bg-yellow-500 rounded-md flex items-center justify-center">
+                        <span class="text-white text-sm">⚠️</span>
+                    </div>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Низкий заряд</p>
+                    <p class="text-2xl font-semibold text-gray-900 dark:text-white">{{ low_battery_count|default:0 }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Последние сообщения -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white">Последние сообщения</h3>
+            <a href="{% url 'admin:devices_message_changelist' %}" class="text-primary-600 hover:text-primary-700 text-sm">Все сообщения →</a>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead class="bg-gray-50 dark:bg-gray-900/30">
+                    <tr>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Устройство</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Время</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Отправитель</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Сообщение</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    {% if recent_messages %}
+                        {% for m in recent_messages %}
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-900/20">
+                            <td class="px-4 py-2 whitespace-nowrap">
+                                <div class="text-sm font-medium text-gray-900 dark:text-white">{{ m.device_name }}</div>
+                            </td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                {{ m.date_created|date:"d.m.Y H:i" }}
+                            </td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-700 dark:text-gray-200">{{ m.sender }}</td>
+                            <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-200">
+                                <div class="max-w-xl truncate">{{ m.text }}</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td class="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-300" colspan="4">Нет сообщений</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Быстрые ссылки -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Быстрые ссылки</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <a href="{% url 'admin:devices_device_changelist' %}"
+               class="flex items-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
+                <div class="flex-shrink-0">
+                    <span class="text-2xl">📱</span>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-blue-900 dark:text-blue-100">Устройства</p>
+                    <p class="text-xs text-blue-600 dark:text-blue-300">Управление устройствами</p>
+                </div>
+            </a>
+
+            <a href="{% url 'admin:devices_batteryreport_changelist' %}"
+               class="flex items-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors">
+                <div class="flex-shrink-0">
+                    <span class="text-2xl">🔋</span>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-green-900 dark:text-green-100">Батарея</p>
+                    <p class="text-xs text-green-600 dark:text-green-300">Отчеты о батарее</p>
+                </div>
+            </a>
+
+            <a href="{% url 'admin:devices_message_changelist' %}"
+               class="flex items-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">
+                <div class="flex-shrink-0">
+                    <span class="text-2xl">💬</span>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-purple-900 dark:text-purple-100">Сообщения</p>
+                    <p class="text-xs text-purple-600 dark:text-purple-300">История сообщений</p>
+                </div>
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
