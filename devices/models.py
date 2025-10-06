@@ -6,7 +6,6 @@ from django.utils.translation import gettext_lazy as _
 
 class Device(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    external_id = models.TextField(_('Внешний ID'), null=True, blank=True)
     token = models.UUIDField(_('Токен'), unique=True, default=uuid.uuid4, editable=False)
     name = models.CharField(_('Название'), max_length=255)
     last_seen = models.DateTimeField(_('Последний раз онлайн'), null=True, blank=True)
@@ -72,17 +71,52 @@ class TelegramUser(models.Model):
         ordering = ['-created_at']
 
 
+class NotificationFilter(models.Model):
+    """
+    Модель для хранения правил фильтрации уведомлений
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    package_name = models.CharField(_('Имя пакета'), max_length=255, unique=True, help_text=_('Имя пакета приложения (например: com.android.systemui)'))
+    description = models.CharField(_('Описание'), max_length=500, blank=True, help_text=_('Описание для чего используется этот пакет'))
+    is_active = models.BooleanField(_('Активен'), default=True, help_text=_('Включена ли фильтрация для этого пакета'))
+    filter_type = models.CharField(
+        _('Тип фильтра'),
+        max_length=20,
+        choices=[
+            ('blacklist', _('Черный список - блокировать')),
+            ('whitelist', _('Белый список - разрешить')),
+        ],
+        default='blacklist',
+        help_text=_('Тип фильтрации')
+    )
+    created_at = models.DateTimeField(_('Создано'), auto_now_add=True)
+    updated_at = models.DateTimeField(_('Обновлено'), auto_now=True)
+
+    def __str__(self):
+        status = "✅" if self.is_active else "❌"
+        return f"{status} {self.package_name} ({self.get_filter_type_display()})"
+
+    class Meta:
+        verbose_name = _('Фильтр уведомлений')
+        verbose_name_plural = _('Фильтры уведомлений')
+        ordering = ['package_name']
+
+
 class Message(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='messages', verbose_name=_('Устройство'))
     date_created = models.DateTimeField(_('Дата создания'), default=timezone.now)
     sender = models.CharField(_('Отправитель'), max_length=255)
     text = models.TextField(_('Текст сообщения'))
+    package_name = models.CharField(_('Имя пакета'), max_length=255, blank=True, help_text=_('Имя пакета приложения, отправившего уведомление'))
+    is_filtered = models.BooleanField(_('Отфильтровано'), default=False, help_text=_('Было ли уведомление отфильтровано'))
+    filter_reason = models.CharField(_('Причина фильтрации'), max_length=500, blank=True, help_text=_('Причина, по которой уведомление было отфильтровано'))
     raw_payload = models.JSONField(_('Исходные данные'), default=dict, blank=True)
     created_at = models.DateTimeField(_('Создано'), auto_now_add=True)
 
     def __str__(self):
-        return f"Message from {self.sender} - {self.device.name}"
+        filtered = " [FILTERED]" if self.is_filtered else ""
+        return f"Message from {self.sender} - {self.device.name}{filtered}"
 
     class Meta:
         verbose_name = _('Сообщение')

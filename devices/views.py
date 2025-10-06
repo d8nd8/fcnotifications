@@ -8,6 +8,7 @@ from drf_yasg import openapi
 from .models import Device, BatteryReport, Message
 from .serializers import DeviceSerializer, BatteryReportSerializer, MessageSerializer
 from .notifications import notify
+from .notification_filter import NotificationFilterService
 
 
 class DeviceView(APIView):
@@ -222,6 +223,11 @@ class MessageView(APIView):
                     max_length=1000,
                     example='Помогите! Застрял в лифте на 5 этаже!'
                 ),
+                'package_name': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Имя пакета приложения, отправившего уведомление (например: com.onlyone.app.FC)',
+                    example='com.onlyone.app.FC'
+                ),
                 'date_created': openapi.Schema(
                     type=openapi.TYPE_STRING,
                     format=openapi.FORMAT_DATETIME,
@@ -232,11 +238,13 @@ class MessageView(APIView):
         ),
         responses={
             201: openapi.Response(
-                description="Сообщение успешно отправлено",
+                description="Сообщение успешно отправлено или отфильтровано",
                 examples={
                     "application/json": {
                         "id": "550e8400-e29b-41d4-a716-446655440002",
-                        "message": "Сообщение успешно отправлено"
+                        "message": "Сообщение успешно отправлено",
+                        "filtered": False,
+                        "filter_reason": None
                     }
                 }
             ),
@@ -282,28 +290,55 @@ class MessageView(APIView):
         serializer = MessageSerializer(data=request.data)
         
         if serializer.is_valid():
+            # Получаем данные для фильтрации
+            package_name = request.data.get('package_name', '')
+            sender = request.data.get('sender', '')
+            text = request.data.get('text', '')
+            
+            # Проверяем, нужно ли фильтровать уведомление
+            should_filter, filter_reason = NotificationFilterService.should_filter_notification(
+                package_name=package_name,
+                sender=sender,
+                text=text
+            )
+            
             # Create message with raw_payload
             message = serializer.save(
                 device=device,
-                raw_payload=request.data
+                raw_payload=request.data,
+                is_filtered=should_filter,
+                filter_reason=filter_reason
             )
             
             # Update device last_seen
             device.last_seen = timezone.now()
             device.save(update_fields=['last_seen'])
             
-            # Send notification to admin chat
-            notification_text = f"🚨 <b>НОВОЕ СООБЩЕНИЕ</b>\n\n"
-            notification_text += f"📱 <b>Устройство:</b> {device.name}\n"
-            notification_text += f"⏰ <b>Время:</b> {message.date_created.strftime('%d.%m.%Y %H:%M:%S')}\n"
-            notification_text += f"👤 <b>Отправитель:</b> {message.sender}\n\n"
-            notification_text += f"💬 <b>Сообщение:</b>\n{message.text}"
-            
-            # TODO: Move to Celery for async processing
-            notify(notification_text)
+            # Отправляем уведомление только если сообщение не отфильтровано
+            if not should_filter:
+                # Send notification to admin chat
+                notification_text = f"🚨 <b>НОВОЕ СООБЩЕНИЕ</b>\n\n"
+                notification_text += f"📱 <b>Устройство:</b> {device.name}\n"
+                notification_text += f"⏰ <b>Время:</b> {message.date_created.strftime('%d.%m.%Y %H:%M:%S')}\n"
+                notification_text += f"👤 <b>Отправитель:</b> {message.sender}\n"
+                if package_name:
+                    notification_text += f"📦 <b>Пакет:</b> {package_name}\n"
+                notification_text += f"\n💬 <b>Сообщение:</b>\n{message.text}"
+                
+                # TODO: Move to Celery for async processing
+                notify(notification_text)
+                
+                response_message = 'Сообщение успешно отправлено'
+            else:
+                response_message = f'Сообщение отфильтровано: {filter_reason}'
             
             return Response(
-                {'id': str(message.id), 'message': 'Сообщение успешно отправлено'}, 
+                {
+                    'id': str(message.id), 
+                    'message': response_message,
+                    'filtered': should_filter,
+                    'filter_reason': filter_reason if should_filter else None
+                }, 
                 status=status.HTTP_201_CREATED
             )
         

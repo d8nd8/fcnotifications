@@ -5,9 +5,13 @@ from django.utils.safestring import mark_safe
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.contrib import messages
+from django.shortcuts import redirect
+from django.http import HttpRequest
 from datetime import timedelta
 from unfold.admin import ModelAdmin
-from .models import Device, BatteryReport, Message, TelegramUser
+from unfold.decorators import action
+from .models import Device, BatteryReport, Message, TelegramUser, NotificationFilter
 
 
 def dashboard_callback(request, context):
@@ -64,20 +68,57 @@ def dashboard_callback(request, context):
 
 @admin.register(Device)
 class DeviceAdmin(ModelAdmin):
-    list_display = ['name', 'token_display', 'status_badge', 'last_seen', 'created_at']
+    list_display = ['id_display', 'name', 'token_display', 'status_badge', 'last_seen']
+    list_display_links = ['id_display']  # Ссылка на детали через ID
     list_filter = ['created_at', 'last_seen']
-    search_fields = ['name', 'external_id', 'token']
+    search_fields = ['name', 'token']
     readonly_fields = ['id', 'token', 'created_at', 'status_badge']
     list_per_page = 25
+    actions_list = ["create_devices_action"]
+    
+    # Делаем поле name редактируемым в списке
+    list_editable = ['name']
+    
+    @action(description=_("📱 Создать 10 устройств"), url_path="create-devices", permissions=["add"])
+    def create_devices_action(self, request: HttpRequest):
+        """Создает 10 новых устройств с уникальными токенами"""
+        try:
+            created_devices = []
+            for i in range(10):
+                device = Device.objects.create(
+                    name=f"Устройство {i+1}"
+                )
+                created_devices.append(device)
+            
+            messages.success(
+                request, 
+                f'✅ Успешно создано 10 устройств! Токены сгенерированы автоматически.'
+            )
+            
+        except Exception as e:
+            messages.error(
+                request, 
+                f'❌ Ошибка при создании устройств: {str(e)}'
+            )
+        
+        return redirect(reverse('admin:devices_device_changelist'))
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related()
     
-    def token_display(self, obj):
-        """Отображает токен с кнопкой копирования"""
+    def id_display(self, obj):
+        """Отображает первые 8 символов ID как ссылку"""
         return format_html(
-            '<code style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">{}</code>',
-            str(obj.token)[:8] + '...'
+            '<span style="font-family: monospace; font-size: 12px; color: #6b7280;">{}</span>',
+            str(obj.id)[:8] + '...'
+        )
+    id_display.short_description = _('ID')
+    
+    def token_display(self, obj):
+        """Отображает токен (выделяемый для копирования)"""
+        return format_html(
+            '<code style="background: #374151; color: #f3f4f6; padding: 4px 8px; border-radius: 6px; font-family: monospace; font-size: 12px; border: 1px solid #4b5563; user-select: all; cursor: text;" title="Кликните для выделения, затем Ctrl+C для копирования">{}</code>',
+            str(obj.token)
         )
     token_display.short_description = _('Токен')
     
@@ -126,10 +167,10 @@ class BatteryReportAdmin(ModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(ModelAdmin):
-    list_display = ['device', 'sender', 'text_preview', 'date_created', 'created_at']
-    list_filter = ['date_created', 'created_at']
-    search_fields = ['device__name', 'sender', 'text']
-    readonly_fields = ['id', 'created_at', 'text_preview']
+    list_display = ['device', 'sender', 'package_name', 'filtered_badge', 'text_preview', 'date_created', 'created_at']
+    list_filter = ['date_created', 'created_at', 'is_filtered', 'package_name']
+    search_fields = ['device__name', 'sender', 'text', 'package_name']
+    readonly_fields = ['id', 'created_at', 'text_preview', 'filtered_badge']
     list_per_page = 25
     
     def text_preview(self, obj):
@@ -142,6 +183,51 @@ class MessageAdmin(ModelAdmin):
             text
         )
     text_preview.short_description = _('Текст сообщения')
+    
+    def filtered_badge(self, obj):
+        """Показывает статус фильтрации"""
+        if obj.is_filtered:
+            return format_html(
+                '<span style="background: #ff9800; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🚫 Отфильтровано</span>'
+            )
+        else:
+            return format_html(
+                '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">✅ Доставлено</span>'
+            )
+    filtered_badge.short_description = _('Статус')
+
+
+@admin.register(NotificationFilter)
+class NotificationFilterAdmin(ModelAdmin):
+    list_display = ['package_name', 'description', 'filter_type_badge', 'is_active_badge', 'created_at']
+    list_filter = ['filter_type', 'is_active', 'created_at']
+    search_fields = ['package_name', 'description']
+    readonly_fields = ['id', 'created_at', 'updated_at']
+    list_per_page = 25
+    
+    def filter_type_badge(self, obj):
+        """Показывает тип фильтра"""
+        if obj.filter_type == 'blacklist':
+            return format_html(
+                '<span style="background: #f44336; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🚫 Черный список</span>'
+            )
+        else:
+            return format_html(
+                '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">✅ Белый список</span>'
+            )
+    filter_type_badge.short_description = _('Тип фильтра')
+    
+    def is_active_badge(self, obj):
+        """Показывает статус активности"""
+        if obj.is_active:
+            return format_html(
+                '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">✅ Активен</span>'
+            )
+        else:
+            return format_html(
+                '<span style="background: #9e9e9e; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">❌ Неактивен</span>'
+            )
+    is_active_badge.short_description = _('Статус')
 
 
 @admin.register(TelegramUser)

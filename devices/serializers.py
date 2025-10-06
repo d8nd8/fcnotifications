@@ -9,7 +9,6 @@ class DeviceSerializer(serializers.ModelSerializer):
     Сериализатор для модели Device
     """
     id = serializers.UUIDField(read_only=True, help_text="Уникальный идентификатор устройства")
-    external_id = serializers.CharField(read_only=True, help_text="Внешний идентификатор устройства")
     token = serializers.CharField(read_only=True, help_text="Токен аутентификации устройства")
     name = serializers.CharField(read_only=True, help_text="Название устройства")
     last_seen = serializers.DateTimeField(read_only=True, help_text="Время последней активности")
@@ -17,7 +16,7 @@ class DeviceSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Device
-        fields = ['id', 'external_id', 'token', 'name', 'last_seen', 'created_at']
+        fields = ['id', 'token', 'name', 'last_seen', 'created_at']
 
 
 class BatteryReportSerializer(serializers.ModelSerializer):
@@ -61,6 +60,12 @@ class MessageSerializer(serializers.ModelSerializer):
         max_length=1000,
         help_text="Текст экстренного сообщения"
     )
+    package_name = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        help_text="Имя пакета приложения, отправившего уведомление"
+    )
     date_created = serializers.DateTimeField(
         required=False,
         help_text="Дата и время создания сообщения (ISO 8601). Если не указано, используется текущее время"
@@ -68,7 +73,7 @@ class MessageSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Message
-        fields = ['date_created', 'sender', 'text']
+        fields = ['date_created', 'sender', 'text', 'package_name']
     
     def validate_date_created(self, value):
         if value and value > timezone.now():
