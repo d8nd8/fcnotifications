@@ -234,43 +234,13 @@ class NotificationFilterAdmin(ModelAdmin):
 
 @admin.register(TelegramUser)
 class TelegramUserAdmin(ModelAdmin):
-    list_display = ['user_display', 'username', 'token_display', 'is_active', 'last_activity', 'created_at']
+    list_display = ['user_display', 'username', 'is_active', 'last_activity', 'created_at']
     list_filter = ['is_active', 'created_at', 'last_activity']
-    search_fields = ['username', 'first_name', 'last_name', 'user_id', 'token']
+    search_fields = ['username', 'first_name', 'last_name', 'user_id']
     readonly_fields = ['id', 'user_id', 'created_at', 'last_activity']
     list_per_page = 25
-    actions_list = ['generate_token']
-    
     def get_queryset(self, request):
-        return super().get_queryset(request).filter(user_id__gt=0)  # Скрываем токены (отрицательные ID)
-    
-    @action(description=_("🔑 Сгенерировать токен авторизации"), url_path="generate-token", permissions=["add"])
-    def generate_token(self, request):
-        """Генерация одного токена авторизации"""
-        # Генерируем уникальный токен
-        while True:
-            token = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(16))
-            
-            # Проверяем, что токен уникален
-            if not TelegramUser.objects.filter(token=token).exists():
-                break
-        
-        # Находим следующий отрицательный ID
-        last_token_id = TelegramUser.objects.filter(user_id__lt=0).order_by('user_id').first()
-        next_id = (last_token_id.user_id - 1) if last_token_id else -1
-        
-        # Создаем токен
-        TelegramUser.objects.create(
-            user_id=next_id,
-            username=None,
-            first_name=None,
-            last_name=None,
-            token=token,
-            is_active=False
-        )
-        
-        messages.success(request, f'Токен сгенерирован: {token}')
-        return redirect(reverse('admin:devices_telegramuser_changelist'))
+        return super().get_queryset(request)
     
     def user_display(self, obj):
         """Отображает информацию о пользователе"""
@@ -281,22 +251,6 @@ class TelegramUserAdmin(ModelAdmin):
             name, username
         )
     user_display.short_description = _('Пользователь')
-    
-    def token_display(self, obj):
-        """Отображает токен авторизации"""
-        if obj.token:
-            if obj.is_active:
-                return format_html(
-                    '<span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 11px;">{}</span>',
-                    obj.token
-                )
-            else:
-                return format_html(
-                    '<span style="background: #ff9800; color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 11px;">{}</span>',
-                    obj.token
-                )
-        return "—"
-    token_display.short_description = _('Токен')
 
 
 @admin.register(AuthToken)
@@ -306,6 +260,7 @@ class AuthTokenAdmin(ModelAdmin):
     search_fields = ['token', 'used_by__username', 'used_by__first_name']
     readonly_fields = ['id', 'created_at', 'used_at']
     list_per_page = 25
+    actions_list = ['generate_token']
     
     def is_used_display(self, obj):
         """Отображает статус использования токена"""

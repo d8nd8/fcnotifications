@@ -190,6 +190,11 @@ UNFOLD = {
                         "link": "/admin/devices/telegramuser/",
                     },
                     {
+                        "title": "Токены авторизации",
+                        "icon": "key",
+                        "link": "/admin/devices/authtoken/",
+                    },
+                    {
                         "title": "Отчеты о батарее",
                         "icon": "battery_charging_full",
                         "link": "/admin/devices/batteryreport/",
