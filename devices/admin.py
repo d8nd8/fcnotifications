@@ -106,7 +106,7 @@ class DeviceAdmin(ModelAdmin):
         return redirect(reverse('admin:devices_device_changelist'))
     
     def get_queryset(self, request):
-        return super().get_queryset(request).filter(user_id__gt=0)  # Скрываем токены (отрицательные ID)
+        return super().get_queryset(request).select_related()
     
     def id_display(self, obj):
         """Отображает первые 8 символов ID как ссылку"""
@@ -239,11 +239,12 @@ class TelegramUserAdmin(ModelAdmin):
     search_fields = ['username', 'first_name', 'last_name', 'user_id', 'token']
     readonly_fields = ['id', 'user_id', 'created_at', 'last_activity']
     list_per_page = 25
+    actions_list = ['generate_token']
     
     def get_queryset(self, request):
         return super().get_queryset(request).filter(user_id__gt=0)  # Скрываем токены (отрицательные ID)
     
-    @action(description="Сгенерировать токен авторизации")
+    @action(description=_("🔑 Сгенерировать токен авторизации"), url_path="generate-token", permissions=["add"])
     def generate_token(self, request):
         """Генерация одного токена авторизации"""
         # Генерируем уникальный токен
