@@ -57,7 +57,6 @@ class TelegramUser(models.Model):
     username = models.CharField(_('Username'), max_length=255, null=True, blank=True)
     first_name = models.CharField(_('Имя'), max_length=255, null=True, blank=True)
     last_name = models.CharField(_('Фамилия'), max_length=255, null=True, blank=True)
-    token = models.CharField(_('Токен авторизации'), max_length=32, unique=True, null=True, blank=True, help_text=_('Токен для авторизации в боте'))
     is_active = models.BooleanField(_('Активен'), default=True)
     created_at = models.DateTimeField(_('Создано'), auto_now_add=True)
     last_activity = models.DateTimeField(_('Последняя активность'), auto_now=True)
@@ -69,6 +68,24 @@ class TelegramUser(models.Model):
     class Meta:
         verbose_name = _('Пользователь Telegram')
         verbose_name_plural = _('Пользователи Telegram')
+        ordering = ['-created_at']
+
+
+class AuthToken(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    token = models.CharField(_('Токен'), max_length=32, unique=True)
+    is_used = models.BooleanField(_('Использован'), default=False)
+    used_by = models.ForeignKey(TelegramUser, on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_('Использован пользователем'))
+    created_at = models.DateTimeField(_('Создан'), auto_now_add=True)
+    used_at = models.DateTimeField(_('Использован'), null=True, blank=True)
+
+    def __str__(self):
+        status = "✅ Использован" if self.is_used else "⏳ Не использован"
+        return f"{self.token} - {status}"
+
+    class Meta:
+        verbose_name = _('Токен авторизации')
+        verbose_name_plural = _('Токены авторизации')
         ordering = ['-created_at']
 
 

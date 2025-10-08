@@ -22,7 +22,7 @@ django.setup()
 
 import logging
 from django.conf import settings
-from devices.models import Device, Message, BatteryReport, TelegramUser
+from devices.models import Device, Message, BatteryReport, TelegramUser, AuthToken
 from devices.notifications import notify
 
 # Configure logging
@@ -141,28 +141,28 @@ class SimpleTelegramBot:
             telegram_user = TelegramUser.objects.get(user_id=user['id'])
             
             # Проверяем, не авторизован ли уже
-            if telegram_user.token:
+            if AuthToken.objects.filter(used_by=telegram_user, is_used=True).exists():
                 self.send_message(chat_id, "❌ Вы уже авторизованы!")
                 return
             
-            # Ищем токен среди неиспользованных (отрицательные user_id)
-            available_user = TelegramUser.objects.filter(
+            # Ищем неиспользованный токен
+            auth_token = AuthToken.objects.filter(
                 token=token,
-                user_id__lt=0,
-                is_active=False
+                is_used=False
             ).first()
             
-            if not available_user:
+            if not auth_token:
                 self.send_message(chat_id, "❌ Неверный или уже использованный токен!")
                 return
             
             # Привязываем токен к пользователю
-            telegram_user.token = token
+            auth_token.is_used = True
+            auth_token.used_by = telegram_user
+            auth_token.used_at = timezone.now()
+            auth_token.save()
+            
             telegram_user.is_active = True
             telegram_user.save()
-            
-            # Удаляем токен из доступных
-            available_user.delete()
             
             self.send_message(chat_id, "✅ Авторизация успешна! Теперь вы можете использовать бота.")
             logger.info(f"User {user['id']} authorized with token {token}")
@@ -224,7 +224,7 @@ class SimpleTelegramBot:
         """Check if user is authorized."""
         try:
             telegram_user = TelegramUser.objects.get(user_id=user_id)
-            return telegram_user.token is not None and telegram_user.is_active
+            return AuthToken.objects.filter(used_by=telegram_user, is_used=True).exists() and telegram_user.is_active
         except TelegramUser.DoesNotExist:
             return False
 

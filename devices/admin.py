@@ -11,7 +11,7 @@ from django.http import HttpRequest
 from datetime import timedelta
 from unfold.admin import ModelAdmin
 from unfold.decorators import action
-from .models import Device, BatteryReport, Message, TelegramUser, NotificationFilter
+from .models import Device, BatteryReport, Message, TelegramUser, NotificationFilter, AuthToken
 import secrets
 import string
 
@@ -297,4 +297,53 @@ class TelegramUserAdmin(ModelAdmin):
                 )
         return "—"
     token_display.short_description = _('Токен')
+
+
+@admin.register(AuthToken)
+class AuthTokenAdmin(ModelAdmin):
+    list_display = ['token', 'is_used_display', 'used_by_display', 'created_at', 'used_at']
+    list_filter = ['is_used', 'created_at', 'used_at']
+    search_fields = ['token', 'used_by__username', 'used_by__first_name']
+    readonly_fields = ['id', 'created_at', 'used_at']
+    list_per_page = 25
+    
+    def is_used_display(self, obj):
+        """Отображает статус использования токена"""
+        if obj.is_used:
+            return format_html(
+                '<span style="background: #4caf50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">✅ Использован</span>'
+            )
+        else:
+            return format_html(
+                '<span style="background: #ff9800; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">⏳ Не использован</span>'
+            )
+    is_used_display.short_description = _('Статус')
+    
+    def used_by_display(self, obj):
+        """Отображает пользователя, использовавшего токен"""
+        if obj.used_by:
+            return format_html(
+                '<div><strong>{}</strong><br><small style="color: #666;">@{}</small></div>',
+                f"{obj.used_by.first_name} {obj.used_by.last_name}".strip() or "Без имени",
+                obj.used_by.username or "Без username"
+            )
+        return "—"
+    used_by_display.short_description = _('Использован пользователем')
+    
+    @action(description=_("🔑 Сгенерировать токен"), url_path="generate-token", permissions=["add"])
+    def generate_token(self, request):
+        """Генерация одного токена авторизации"""
+        # Генерируем уникальный токен
+        while True:
+            token = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(16))
+            
+            # Проверяем, что токен уникален
+            if not AuthToken.objects.filter(token=token).exists():
+                break
+        
+        # Создаем токен
+        AuthToken.objects.create(token=token)
+        
+        messages.success(request, f'Токен сгенерирован: {token}')
+        return redirect(reverse('admin:devices_authtoken_changelist'))
 
