@@ -12,6 +12,8 @@ from datetime import timedelta
 from unfold.admin import ModelAdmin
 from unfold.decorators import action
 from .models import Device, BatteryReport, Message, TelegramUser, NotificationFilter
+import secrets
+import string
 
 
 def dashboard_callback(request, context):
@@ -104,7 +106,7 @@ class DeviceAdmin(ModelAdmin):
         return redirect(reverse('admin:devices_device_changelist'))
     
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related()
+        return super().get_queryset(request).filter(user_id__gt=0)  # Скрываем токены (отрицательные ID)
     
     def id_display(self, obj):
         """Отображает первые 8 символов ID как ссылку"""
@@ -237,6 +239,36 @@ class TelegramUserAdmin(ModelAdmin):
     search_fields = ['username', 'first_name', 'last_name', 'user_id', 'token']
     readonly_fields = ['id', 'user_id', 'created_at', 'last_activity']
     list_per_page = 25
+    
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(user_id__gt=0)  # Скрываем токены (отрицательные ID)
+    
+    @action(description="Сгенерировать токен авторизации")
+    def generate_token(self, request):
+        """Генерация одного токена авторизации"""
+        # Генерируем уникальный токен
+        while True:
+            token = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(16))
+            
+            # Проверяем, что токен уникален
+            if not TelegramUser.objects.filter(token=token).exists():
+                break
+        
+        # Находим следующий отрицательный ID
+        last_token_id = TelegramUser.objects.filter(user_id__lt=0).order_by('user_id').first()
+        next_id = (last_token_id.user_id - 1) if last_token_id else -1
+        
+        # Создаем токен
+        TelegramUser.objects.create(
+            user_id=next_id,
+            username=f'token_{abs(next_id)}',
+            first_name=f'Token {abs(next_id)}',
+            token=token,
+            is_active=False
+        )
+        
+        messages.success(request, f'Токен сгенерирован: {token}')
+        return redirect(reverse('admin:devices_telegramuser_changelist'))
     
     def user_display(self, obj):
         """Отображает информацию о пользователе"""

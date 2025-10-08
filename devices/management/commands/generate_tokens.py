@@ -39,8 +39,9 @@ class Command(BaseCommand):
                     break
             
             # Создаем пользователя с токеном (неактивного)
+            # Используем отрицательный ID для токенов, чтобы избежать конфликтов
             TelegramUser.objects.create(
-                user_id=0,  # Временный ID, будет заменен при авторизации
+                user_id=-(i+1),  # Отрицательный ID для токенов
                 username=f'token_{i+1}',
                 first_name=f'Token {i+1}',
                 token=token,
