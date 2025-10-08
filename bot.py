@@ -22,6 +22,7 @@ django.setup()
 
 import logging
 from django.conf import settings
+from django.utils import timezone
 from devices.models import Device, Message, BatteryReport, TelegramUser, AuthToken
 from devices.notifications import notify
 
@@ -91,8 +92,8 @@ class SimpleTelegramBot:
                 telegram_user.last_name = user.get('last_name')
                 telegram_user.save()
             
-            # Проверяем, есть ли токен авторизации
-            if not telegram_user.token:
+            # Проверяем авторизацию через AuthToken
+            if not AuthToken.objects.filter(used_by=telegram_user, is_used=True).exists():
                 message = (
                     f'🔐 **Авторизация требуется**\n\n'
                     f'Для использования бота необходимо ввести токен авторизации.\n\n'
