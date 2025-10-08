@@ -57,6 +57,7 @@ class TelegramUser(models.Model):
     username = models.CharField(_('Username'), max_length=255, null=True, blank=True)
     first_name = models.CharField(_('Имя'), max_length=255, null=True, blank=True)
     last_name = models.CharField(_('Фамилия'), max_length=255, null=True, blank=True)
+    token = models.CharField(_('Токен авторизации'), max_length=32, unique=True, null=True, blank=True, help_text=_('Токен для авторизации в боте'))
     is_active = models.BooleanField(_('Активен'), default=True)
     created_at = models.DateTimeField(_('Создано'), auto_now_add=True)
     last_activity = models.DateTimeField(_('Последняя активность'), auto_now=True)

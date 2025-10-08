@@ -302,42 +302,47 @@ class MessageView(APIView):
                 text=text
             )
             
-            # Create message with raw_payload
+            # Если сообщение должно быть отфильтровано - не сохраняем в БД
+            if should_filter:
+                # Update device last_seen
+                device.last_seen = timezone.now()
+                device.save(update_fields=['last_seen'])
+                
+                return Response(
+                    {
+                        'message': f'Сообщение отфильтровано: {filter_reason}',
+                        'filtered': True,
+                        'filter_reason': filter_reason
+                    }, 
+                    status=status.HTTP_200_OK
+                )
+            
+            # Создаем сообщение только если оно не отфильтровано
             message = serializer.save(
                 device=device,
                 raw_payload=request.data,
-                is_filtered=should_filter,
-                filter_reason=filter_reason
+                is_filtered=False,
+                filter_reason=""
             )
             
             # Update device last_seen
             device.last_seen = timezone.now()
             device.save(update_fields=['last_seen'])
             
-            # Отправляем уведомление только если сообщение не отфильтровано
-            if not should_filter:
-                # Send notification to admin chat
-                notification_text = f"🚨 <b>НОВОЕ СООБЩЕНИЕ</b>\n\n"
-                notification_text += f"📱 <b>Устройство:</b> {device.name}\n"
-                notification_text += f"⏰ <b>Время:</b> {message.date_created.strftime('%d.%m.%Y %H:%M:%S')}\n"
-                notification_text += f"👤 <b>Отправитель:</b> {message.sender}\n"
-                if package_name:
-                    notification_text += f"📦 <b>Пакет:</b> {package_name}\n"
-                notification_text += f"\n💬 <b>Сообщение:</b>\n{message.text}"
-                
-                # TODO: Move to Celery for async processing
-                notify(notification_text)
-                
-                response_message = 'Сообщение успешно отправлено'
-            else:
-                response_message = f'Сообщение отфильтровано: {filter_reason}'
+            # Send notification to admin chat
+            notification_text = f"🚨 <b>НОВОЕ СООБЩЕНИЕ</b>\n\n"
+            notification_text += f"{device.name} {message.date_created.strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+            notification_text += f"💬 <b>Сообщение:</b>\n{message.text}"
+            
+            # TODO: Move to Celery for async processing
+            notify(notification_text)
             
             return Response(
                 {
                     'id': str(message.id), 
-                    'message': response_message,
-                    'filtered': should_filter,
-                    'filter_reason': filter_reason if should_filter else None
+                    'message': 'Сообщение успешно отправлено',
+                    'filtered': False,
+                    'filter_reason': None
                 }, 
                 status=status.HTTP_201_CREATED
             )

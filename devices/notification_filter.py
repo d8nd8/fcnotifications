@@ -55,6 +55,10 @@ class NotificationFilterService:
         if not package_name:
             return False, ""
         
+        # Специальная логика для SMS - разрешаем только важные
+        if package_name == 'com.google.android.apps.messaging':
+            return cls._check_sms_importance(text)
+        
         # Проверяем правила из базы данных
         db_result = cls._check_database_filters(package_name)
         if db_result[0]:
@@ -70,6 +74,49 @@ class NotificationFilterService:
             return pattern_result
         
         return False, ""
+    
+    @classmethod
+    def _check_sms_importance(cls, text: str) -> Tuple[bool, str]:
+        """
+        Проверяет важность SMS сообщения
+        Разрешаем только важные SMS от банков и операторов
+        """
+        if not text:
+            return True, "Пустое SMS сообщение"
+        
+        # Паттерны важных SMS (НЕ фильтруем)
+        important_patterns = [
+            r'Снятие наличных',  # Банковские операции
+            r'Баланс:',  # Информация о балансе
+            r'Код:\s*\d+',  # SMS коды
+            r'код\s*\d+',  # SMS коды (строчными буквами)
+            r'Пожалуйста, получив сообщение',  # Настройки оператора
+            r'Уважаемый Клиент',  # Официальные уведомления
+            r'С заботой о Вас',  # Официальные уведомления
+            r'voshel v.*Onlajn',  # Банковские уведомления
+            r'Polzovatel.*voshel',  # Банковские уведомления
+            r'RMX\d+',  # OTA обновления (важные)
+            r'Обновление системы',  # Системные обновления
+            r'Критическое обновление',  # Критические обновления
+            r'Вам было отправлено СМС',  # Настройки интернета
+            r'Пытались с вами связаться',  # Важные уведомления
+            r'Никому не сообщайте код',  # Банковские коды
+            r'код подтверждения',  # Коды подтверждения
+            r'вход в.*код',  # Коды входа
+            r'СберБизнес',  # Сбербанк бизнес
+            r'ВТБ',  # ВТБ банк
+            r'Альфа.*код',  # Альфа-банк коды
+            r'LOCKO.*код',  # Локо-банк коды
+            r'BLANC.*код',  # Бланк банк коды
+        ]
+        
+        # Проверяем, является ли SMS важным
+        for pattern in important_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return False, ""  # НЕ фильтруем важные SMS
+        
+        # Если не найдено важных паттернов - фильтруем
+        return True, "Неважное SMS сообщение"
     
     @classmethod
     def _check_database_filters(cls, package_name: str) -> Tuple[bool, str]:
@@ -159,6 +206,19 @@ class NotificationFilterService:
                 r'Background app',
                 r'App installed',
                 r'App updated',
+                r'This service is running in the foreground',  # Ваше приложение
+                r'Осталось:\s*\d+\s*%',  # Процент батареи
+                r'Выполняем проверку контента',  # Системные уведомления
+                r'Нажмите, чтобы настроить',  # Системные уведомления
+                r'Ваш телефон был автоматически отсоединен',  # Системные уведомления
+                r'No Content',  # Пустые уведомления
+                r'Снятие наличных',  # Банковские SMS
+                r'Баланс:',  # Банковские SMS
+                r'Код:\s*\d+',  # SMS коды
+                r'Пожалуйста, получив сообщение',  # Настройки оператора
+                r'Уважаемый Клиент',  # Рекламные SMS
+                r'С заботой о Вас',  # Рекламные SMS
+                r'voshel v.*Onlajn',  # Банковские уведомления
             ]
             
             for pattern in text_patterns:

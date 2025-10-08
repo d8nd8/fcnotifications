@@ -232,9 +232,9 @@ class NotificationFilterAdmin(ModelAdmin):
 
 @admin.register(TelegramUser)
 class TelegramUserAdmin(ModelAdmin):
-    list_display = ['user_display', 'username', 'is_active', 'last_activity', 'created_at']
+    list_display = ['user_display', 'username', 'token_display', 'is_active', 'last_activity', 'created_at']
     list_filter = ['is_active', 'created_at', 'last_activity']
-    search_fields = ['username', 'first_name', 'last_name', 'user_id']
+    search_fields = ['username', 'first_name', 'last_name', 'user_id', 'token']
     readonly_fields = ['id', 'user_id', 'created_at', 'last_activity']
     list_per_page = 25
     
@@ -247,4 +247,20 @@ class TelegramUserAdmin(ModelAdmin):
             name, username
         )
     user_display.short_description = _('Пользователь')
+    
+    def token_display(self, obj):
+        """Отображает токен авторизации"""
+        if obj.token:
+            if obj.is_active:
+                return format_html(
+                    '<span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 11px;">{}</span>',
+                    obj.token
+                )
+            else:
+                return format_html(
+                    '<span style="background: #ff9800; color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 11px;">{}</span>',
+                    obj.token
+                )
+        return "—"
+    token_display.short_description = _('Токен')
 

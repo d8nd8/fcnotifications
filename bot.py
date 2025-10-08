@@ -89,21 +89,31 @@ class SimpleTelegramBot:
                 telegram_user.username = user.get('username')
                 telegram_user.first_name = user.get('first_name')
                 telegram_user.last_name = user.get('last_name')
-                telegram_user.is_active = True
                 telegram_user.save()
             
-            status_text = "✅ Вы подписаны на уведомления!" if created else "✅ Подписка обновлена!"
-            
-            message = (
-                f'🤖 **Сервис Алертов FC Phones**\n\n'
-                f'{status_text}\n\n'
-                'Доступные команды:\n'
-                '/start - Показать это сообщение\n'
-                '/devices - Список всех устройств\n'
-                '/test - Отправить тестовое уведомление\n'
-                '/help - Показать справку\n\n'
-                '🔔 Здесь вы будете получать уведомления о новых сообщениях от устройств!'
-            )
+            # Проверяем, есть ли токен авторизации
+            if not telegram_user.token:
+                message = (
+                    f'🔐 **Авторизация требуется**\n\n'
+                    f'Для использования бота необходимо ввести токен авторизации.\n\n'
+                    f'Используйте команду:\n'
+                    f'/auth <ваш_токен>\n\n'
+                    f'Токен можно получить у администратора.'
+                )
+            else:
+                telegram_user.is_active = True
+                telegram_user.save()
+                
+                message = (
+                    f'🤖 **Сервис Алертов FC Phones**\n\n'
+                    f'✅ Вы авторизованы и подписаны на уведомления!\n\n'
+                    'Доступные команды:\n'
+                    '/start - Показать это сообщение\n'
+                    '/devices - Список всех устройств\n'
+                    '/test - Отправить тестовое уведомление\n'
+                    '/help - Показать справку\n\n'
+                    '🔔 Здесь вы будете получать уведомления о новых сообщениях от устройств!'
+                )
             
             self.send_message(chat_id, message)
             logger.info(f"User {user['id']} ({user.get('username')}) {'created' if created else 'updated'}")
@@ -112,12 +122,63 @@ class SimpleTelegramBot:
             logger.error(f"Error processing /start: {e}")
             self.send_message(chat_id, "❌ Произошла ошибка. Попробуйте позже.")
     
+    def handle_auth(self, update):
+        """Handle /auth command."""
+        user = update['message']['from']
+        chat_id = update['message']['chat']['id']
+        text = update['message'].get('text', '')
+        
+        # Извлекаем токен из команды
+        parts = text.split()
+        if len(parts) != 2:
+            self.send_message(chat_id, "❌ Неверный формат команды. Используйте: /auth <токен>")
+            return
+        
+        token = parts[1].strip()
+        
+        try:
+            # Ищем пользователя
+            telegram_user = TelegramUser.objects.get(user_id=user['id'])
+            
+            # Проверяем, не авторизован ли уже
+            if telegram_user.token:
+                self.send_message(chat_id, "❌ Вы уже авторизованы!")
+                return
+            
+            # Ищем токен среди неиспользованных
+            from django.db.models import Q
+            available_user = TelegramUser.objects.filter(
+                Q(token=token) & Q(is_active=False)
+            ).first()
+            
+            if not available_user:
+                self.send_message(chat_id, "❌ Неверный или уже использованный токен!")
+                return
+            
+            # Привязываем токен к пользователю
+            telegram_user.token = token
+            telegram_user.is_active = True
+            telegram_user.save()
+            
+            # Удаляем токен из доступных
+            available_user.delete()
+            
+            self.send_message(chat_id, "✅ Авторизация успешна! Теперь вы можете использовать бота.")
+            logger.info(f"User {user['id']} authorized with token {token}")
+            
+        except TelegramUser.DoesNotExist:
+            self.send_message(chat_id, "❌ Пользователь не найден. Сначала используйте /start")
+        except Exception as e:
+            logger.error(f"Error processing /auth: {e}")
+            self.send_message(chat_id, "❌ Произошла ошибка. Попробуйте позже.")
+
     def handle_help(self, update):
         """Handle /help command."""
         chat_id = update['message']['chat']['id']
         message = (
             '**Доступные команды:**\n\n'
             '/start - Показать приветственное сообщение\n'
+            '/auth <токен> - Авторизация в боте\n'
             '/devices - Список всех устройств\n'
             '/test - Отправить тестовое уведомление\n'
             '/help - Показать эту справку\n\n'
@@ -129,7 +190,13 @@ class SimpleTelegramBot:
     
     def handle_devices(self, update):
         """Handle /devices command."""
+        user = update['message']['from']
         chat_id = update['message']['chat']['id']
+        
+        # Проверяем авторизацию
+        if not self._check_auth(user['id']):
+            self.send_message(chat_id, "❌ Необходима авторизация. Используйте /auth <токен>")
+            return
         
         try:
             devices = Device.objects.all()[:10]  # Limit to 10 devices
@@ -152,9 +219,23 @@ class SimpleTelegramBot:
             logger.error(f"Error processing /devices: {e}")
             self.send_message(chat_id, "❌ Произошла ошибка при получении списка устройств.")
     
+    def _check_auth(self, user_id):
+        """Check if user is authorized."""
+        try:
+            telegram_user = TelegramUser.objects.get(user_id=user_id)
+            return telegram_user.token is not None and telegram_user.is_active
+        except TelegramUser.DoesNotExist:
+            return False
+
     def handle_test(self, update):
         """Handle /test command."""
+        user = update['message']['from']
         chat_id = update['message']['chat']['id']
+        
+        # Проверяем авторизацию
+        if not self._check_auth(user['id']):
+            self.send_message(chat_id, "❌ Необходима авторизация. Используйте /auth <токен>")
+            return
         
         test_message = "🧪 <b>ТЕСТОВОЕ УВЕДОМЛЕНИЕ</b>\n\n"
         test_message += "📱 <b>Устройство:</b> Тестовое устройство\n"
@@ -174,6 +255,8 @@ class SimpleTelegramBot:
         
         if text.startswith('/start'):
             self.handle_start(update)
+        elif text.startswith('/auth'):
+            self.handle_auth(update)
         elif text.startswith('/help'):
             self.handle_help(update)
         elif text.startswith('/devices'):
