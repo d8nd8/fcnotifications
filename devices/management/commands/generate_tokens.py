@@ -38,12 +38,13 @@ class Command(BaseCommand):
                 if not TelegramUser.objects.filter(token=token).exists():
                     break
             
-            # Создаем пользователя с токеном (неактивного)
+            # Создаем токен без привязки к пользователю
             # Используем отрицательный ID для токенов, чтобы избежать конфликтов
             TelegramUser.objects.create(
                 user_id=-(i+1),  # Отрицательный ID для токенов
-                username=f'token_{i+1}',
-                first_name=f'Token {i+1}',
+                username=None,  # Без username
+                first_name=None,  # Без имени
+                last_name=None,  # Без фамилии
                 token=token,
                 is_active=False  # Токен неактивен до использования
             )

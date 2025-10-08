@@ -262,8 +262,9 @@ class TelegramUserAdmin(ModelAdmin):
         # Создаем токен
         TelegramUser.objects.create(
             user_id=next_id,
-            username=f'token_{abs(next_id)}',
-            first_name=f'Token {abs(next_id)}',
+            username=None,
+            first_name=None,
+            last_name=None,
             token=token,
             is_active=False
         )
