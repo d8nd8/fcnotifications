@@ -145,10 +145,11 @@ class SimpleTelegramBot:
                 self.send_message(chat_id, "❌ Вы уже авторизованы!")
                 return
             
-            # Ищем токен среди неиспользованных
-            from django.db.models import Q
+            # Ищем токен среди неиспользованных (отрицательные user_id)
             available_user = TelegramUser.objects.filter(
-                Q(token=token) & Q(is_active=False)
+                token=token,
+                user_id__lt=0,
+                is_active=False
             ).first()
             
             if not available_user:
