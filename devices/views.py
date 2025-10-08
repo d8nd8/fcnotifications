@@ -302,7 +302,7 @@ class MessageView(APIView):
                 text=text
             )
             
-            # Если сообщение должно быть отфильтровано - не сохраняем в БД
+            # Если сообщение должно быть отфильтровано - не сохраняем в БД и не отправляем уведомление
             if should_filter:
                 # Update device last_seen
                 device.last_seen = timezone.now()
@@ -329,7 +329,7 @@ class MessageView(APIView):
             device.last_seen = timezone.now()
             device.save(update_fields=['last_seen'])
             
-            # Send notification to admin chat
+            # Send notification to admin chat ТОЛЬКО для неотфильтрованных сообщений
             notification_text = f"🚨 <b>НОВОЕ СООБЩЕНИЕ</b>\n\n"
             notification_text += f"{device.name} {message.date_created.strftime('%d.%m.%Y %H:%M:%S')}\n\n"
             notification_text += f"💬 <b>Сообщение:</b>\n{message.text}"
