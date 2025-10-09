@@ -53,6 +53,9 @@ class NotificationFilterService:
             Tuple[bool, str]: (нужно_ли_фильтровать, причина_фильтрации)
         """
         if not package_name:
+            # Если package_name пустой, проверяем только по тексту
+            if text and cls._is_system_message(text):
+                return True, "Системное сообщение - фильтруется"
             return False, ""
         
         # ХАРДКОД - фильтруем ВСЕ сообщения кроме банковских SMS
