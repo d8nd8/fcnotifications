@@ -57,6 +57,12 @@ class NotificationFilterService:
         
         # ХАРДКОД - фильтруем ВСЕ сообщения кроме банковских SMS
         # Разрешаем только SMS от банков и операторов
+        
+        # Сначала проверяем системные паттерны - если найдены, то ВСЕГДА фильтруем
+        if text and cls._is_system_message(text):
+            return True, "Системное сообщение - фильтруется"
+        
+        # Только для SMS проверяем банковские паттерны
         if package_name == 'com.google.android.apps.messaging':
             # Проверяем, является ли это банковским SMS
             if text and cls._is_banking_sms(text):
@@ -66,6 +72,42 @@ class NotificationFilterService:
         
         # Фильтруем ВСЕ остальные сообщения
         return True, "Фильтр: только банковские SMS разрешены"
+    
+    @classmethod
+    def _is_system_message(cls, text: str) -> bool:
+        """
+        Проверяет, является ли сообщение системным (нужно фильтровать)
+        """
+        if not text:
+            return True  # Пустые сообщения фильтруем
+        
+        # Системные паттерны для фильтрации
+        system_patterns = [
+            r'^No Content$',
+            r'Осталось совсем немного',
+            r'Чтобы продолжить, подключитесь к Интернету',
+            r'Безопасная загрузка проверенных приложений',
+            r'This service is running in the foreground',
+            r'Download completed',
+            r'Download failed',
+            r'System update',
+            r'OTA update',
+            r'Battery optimization',
+            r'Storage space',
+            r'Background app',
+            r'App installed',
+            r'App updated',
+            r'Осталось:\s*\d+\s*%',
+            r'Выполняем проверку контента',
+            r'Нажмите, чтобы настроить',
+            r'Ваш телефон был автоматически отсоединен',
+        ]
+        
+        for pattern in system_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+        
+        return False
     
     @classmethod
     def _is_banking_sms(cls, text: str) -> bool:
@@ -145,6 +187,7 @@ class NotificationFilterService:
             r'Yota',
             r'Ростелеком',
         ]
+        
         
         for pattern in banking_patterns:
             if re.search(pattern, text, re.IGNORECASE):
