@@ -450,6 +450,14 @@ class LogFileView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Проверяем размер файла (максимум 50 MB)
+        max_size = 50 * 1024 * 1024  # 50 MB
+        if uploaded_file.size > max_size:
+            return Response(
+                {'error': f'Файл слишком большой. Максимальный размер: {max_size // 1024 // 1024} MB'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         # Читаем содержимое файла
         try:
             file_content = uploaded_file.read().decode('utf-8')
