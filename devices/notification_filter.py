@@ -36,7 +36,14 @@ class NotificationFilterService:
         'com.android.systemui.recents',
         'com.android.systemui.statusbar',
         'com.android.systemui.notification',
-        'com.onlyone.app.FC',  # Ваш пример
+        'com.onlyone.app.FC',
+         # Ваш пример
+        # Дополнительные системные пакеты для фильтрации
+        'com.android.vending',  # Google Play Store
+        'com.nearme.romupdate',  # OPPO/OnePlus системные обновления
+        'ru.vk.store',  # VK Store
+        'com.xiaomi.mipicks',  # Xiaomi GetApps
+        'com.android.chrome',  # Google Chrome
     ]
     
     @classmethod
@@ -58,23 +65,48 @@ class NotificationFilterService:
                 return True, "Системное сообщение - фильтруется"
             return False, ""
         
-        # ХАРДКОД - фильтруем ВСЕ сообщения кроме банковских SMS
-        # Разрешаем только SMS от банков и операторов
+        # Проверяем системные пакеты из списка
+        if package_name in cls.SYSTEM_PACKAGES:
+            return True, f"Системный пакет {package_name} - фильтруется"
         
-        # Сначала проверяем системные паттерны - если найдены, то ВСЕГДА фильтруем
+        # Проверяем системные паттерны в тексте
         if text and cls._is_system_message(text):
             return True, "Системное сообщение - фильтруется"
         
-        # Только для SMS проверяем банковские паттерны
-        if package_name == 'com.google.android.apps.messaging':
-            # Проверяем, является ли это банковским SMS
-            if text and cls._is_banking_sms(text):
-                return False, ""  # НЕ фильтруем банковские SMS
-            else:
-                return True, "Фильтр: только банковские SMS разрешены"
+        # Проверяем фильтры из базы данных
+        try:
+            # Ищем активные фильтры для этого пакета
+            filters = NotificationFilter.objects.filter(
+                package_name=package_name,
+                is_active=True
+            )
+            
+            for filter_obj in filters:
+                if filter_obj.filter_type == 'blacklist':
+                    return True, f"Фильтр: {filter_obj.description}"
+                elif filter_obj.filter_type == 'whitelist':
+                    return False, f"Разрешено: {filter_obj.description}"
+            
+            # Проверяем фильтры с масками (например, com.android.*)
+            wildcard_filters = NotificationFilter.objects.filter(
+                package_name__endswith='*',
+                is_active=True
+            )
+            
+            for filter_obj in wildcard_filters:
+                prefix = filter_obj.package_name[:-1]  # Убираем *
+                if package_name.startswith(prefix):
+                    if filter_obj.filter_type == 'blacklist':
+                        return True, f"Фильтр по маске: {filter_obj.description}"
+                    elif filter_obj.filter_type == 'whitelist':
+                        return False, f"Разрешено по маске: {filter_obj.description}"
+                        
+        except Exception as e:
+            # Если ошибка с БД, используем системный список как fallback
+            pass
         
-        # Фильтруем ВСЕ остальные сообщения
-        return True, "Фильтр: только банковские SMS разрешены"
+        # По умолчанию разрешаем сообщение
+        return False, ""
     
     @classmethod
     def _is_system_message(cls, text: str) -> bool:
