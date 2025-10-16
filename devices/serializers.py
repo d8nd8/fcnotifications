@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Device, BatteryReport, Message
+from .models import Device, BatteryReport, Message, LogFile
 from django.utils import timezone
 from drf_yasg import openapi
 
@@ -74,6 +74,28 @@ class MessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Message
         fields = ['date_created', 'sender', 'text', 'package_name']
+    
+    def validate_date_created(self, value):
+        if value and value > timezone.now():
+            raise serializers.ValidationError("Дата создания не может быть в будущем")
+        return value
+
+
+class LogFileSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для модели LogFile
+    """
+    text = serializers.CharField(
+        help_text="Текст лога из загруженного файла"
+    )
+    date_created = serializers.DateTimeField(
+        required=False,
+        help_text="Дата и время создания лога (ISO 8601). Если не указано, используется текущее время"
+    )
+    
+    class Meta:
+        model = LogFile
+        fields = ['text', 'date_created']
     
     def validate_date_created(self, value):
         if value and value > timezone.now():

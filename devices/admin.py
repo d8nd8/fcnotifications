@@ -11,7 +11,7 @@ from django.http import HttpRequest
 from datetime import timedelta
 from unfold.admin import ModelAdmin
 from unfold.decorators import action
-from .models import Device, BatteryReport, Message, TelegramUser, NotificationFilter, AuthToken
+from .models import Device, BatteryReport, Message, TelegramUser, NotificationFilter, AuthToken, LogFile
 import secrets
 import string
 
@@ -36,6 +36,11 @@ def dashboard_callback(request, context):
     recent_battery_reports = BatteryReport.objects.filter(created_at__gte=yesterday)
     low_battery_devices = recent_battery_reports.filter(battery_level__lt=20).count()
     
+    # Статистика логов
+    total_logs = LogFile.objects.count()
+    today_logs = LogFile.objects.filter(created_at__gte=yesterday).count()
+    week_logs = LogFile.objects.filter(created_at__gte=week_ago).count()
+    
     # Последние сообщения (лог)
     recent_messages_qs = (
         Message.objects.select_related("device")
@@ -51,6 +56,21 @@ def dashboard_callback(request, context):
         }
         for m in recent_messages_qs
     ]
+    
+    # Последние логи
+    recent_logs_qs = (
+        LogFile.objects.select_related("device")
+        .order_by("-date_created")[:5]
+    )
+    recent_logs = [
+        {
+            "device_name": l.device.name,
+            "device_id": str(l.device.id),
+            "text_preview": l.text[:100] + "..." if len(l.text) > 100 else l.text,
+            "date_created": l.date_created,
+        }
+        for l in recent_logs_qs
+    ]
 
     # Простая статистика для Unfold + данные для таблиц
     context.update({
@@ -62,7 +82,11 @@ def dashboard_callback(request, context):
         'messages_today': today_messages,
         'messages_week': week_messages,
         'low_battery_count': low_battery_devices,
+        'logs_total': total_logs,
+        'logs_today': today_logs,
+        'logs_week': week_logs,
         'recent_messages': recent_messages,
+        'recent_logs': recent_logs,
     })
     
     return context
@@ -301,4 +325,24 @@ class AuthTokenAdmin(ModelAdmin):
         
         messages.success(request, f'Токен сгенерирован: {token}')
         return redirect(reverse('admin:devices_authtoken_changelist'))
+
+
+@admin.register(LogFile)
+class LogFileAdmin(ModelAdmin):
+    list_display = ['device', 'text_preview', 'date_created', 'created_at']
+    list_filter = ['date_created', 'created_at', 'device']
+    search_fields = ['device__name', 'text']
+    readonly_fields = ['id', 'created_at', 'text_preview']
+    list_per_page = 25
+    
+    def text_preview(self, obj):
+        """Показывает превью текста лога"""
+        text = obj.text
+        if len(text) > 100:
+            text = text[:100] + '...'
+        return format_html(
+            '<div style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: pre-wrap; font-family: monospace; font-size: 12px; background: #f5f5f5; padding: 8px; border-radius: 4px;">{}</div>',
+            text
+        )
+    text_preview.short_description = _('Текст лога')
 

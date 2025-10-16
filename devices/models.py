@@ -141,3 +141,19 @@ class Message(models.Model):
         verbose_name_plural = _('Сообщения')
         ordering = ['-date_created']
 
+
+class LogFile(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='log_files', verbose_name=_('Устройство'))
+    text = models.TextField(_('Текст лога'))
+    date_created = models.DateTimeField(_('Дата создания'), default=timezone.now)
+    created_at = models.DateTimeField(_('Создано'), auto_now_add=True)
+
+    def __str__(self):
+        return f"Log from {self.device.name} - {self.date_created.strftime('%d.%m.%Y %H:%M')}"
+
+    class Meta:
+        verbose_name = _('Лог файл')
+        verbose_name_plural = _('Лог файлы')
+        ordering = ['-date_created']
+

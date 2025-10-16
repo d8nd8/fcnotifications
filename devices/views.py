@@ -5,8 +5,8 @@ from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from .models import Device, BatteryReport, Message
-from .serializers import DeviceSerializer, BatteryReportSerializer, MessageSerializer
+from .models import Device, BatteryReport, Message, LogFile
+from .serializers import DeviceSerializer, BatteryReportSerializer, MessageSerializer, LogFileSerializer
 from .notifications import notify
 from .notification_filter import NotificationFilterService
 
@@ -343,6 +343,160 @@ class MessageView(APIView):
                     'message': 'Сообщение успешно отправлено',
                     'filtered': False,
                     'filter_reason': None
+                }, 
+                status=status.HTTP_201_CREATED
+            )
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LogFileView(APIView):
+    """
+    Загрузка txt файла с логом
+    """
+    permission_classes = [IsAuthenticated]
+    
+    @swagger_auto_schema(
+        operation_summary="📄 Загрузить лог файл",
+        operation_description="""
+        Загружает txt файл с логом от устройства.
+        
+        **Аутентификация**: Требуется заголовок `X-TOKEN` с токеном устройства.
+        
+        **Использование**:
+        - Загрузка логов от мобильного устройства
+        - Сохранение текстовых файлов с информацией о работе устройства
+        - Архивирование важной информации от устройства
+        
+        **Автоматические действия**:
+        - Обновление `last_seen` устройства на текущее время
+        - Сохранение содержимого файла в базе данных
+        - Парсинг txt файла и извлечение текста
+        """,
+        tags=['Лог файлы'],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['file'],
+            properties={
+                'file': openapi.Schema(
+                    type=openapi.TYPE_FILE,
+                    description='TXT файл с логом для загрузки',
+                    format=openapi.FORMAT_BINARY
+                ),
+                'date_created': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    format=openapi.FORMAT_DATETIME,
+                    description='Дата и время создания лога (ISO 8601). Если не указано, используется текущее время',
+                    example='2024-01-15T14:30:25Z'
+                )
+            }
+        ),
+        responses={
+            201: openapi.Response(
+                description="Лог файл успешно загружен",
+                examples={
+                    "application/json": {
+                        "id": "550e8400-e29b-41d4-a716-446655440003",
+                        "message": "Лог файл успешно загружен",
+                        "file_size": 1024
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Ошибка валидации данных",
+                examples={
+                    "application/json": {
+                        "file": ["Это поле обязательно."],
+                        "error": "Недопустимый формат файла. Разрешены только .txt файлы."
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Неверный или отсутствующий токен аутентификации",
+                examples={
+                    "application/json": {
+                        "detail": "Authentication credentials were not provided."
+                    }
+                }
+            )
+        },
+        manual_parameters=[
+            openapi.Parameter(
+                'X-TOKEN',
+                openapi.IN_HEADER,
+                description="Токен аутентификации устройства",
+                type=openapi.TYPE_STRING,
+                required=True,
+                example="abc123def456ghi789"
+            )
+        ]
+    )
+    def post(self, request):
+        device = request.user
+        
+        # Проверяем наличие файла
+        if 'file' not in request.FILES:
+            return Response(
+                {'file': ['Это поле обязательно.']}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        uploaded_file = request.FILES['file']
+        
+        # Проверяем расширение файла
+        if not uploaded_file.name.lower().endswith('.txt'):
+            return Response(
+                {'error': 'Недопустимый формат файла. Разрешены только .txt файлы.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Читаем содержимое файла
+        try:
+            file_content = uploaded_file.read().decode('utf-8')
+        except UnicodeDecodeError:
+            return Response(
+                {'error': 'Ошибка чтения файла. Убедитесь, что файл содержит текст в кодировке UTF-8.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Подготавливаем данные для сериализатора
+        data = {
+            'text': file_content,
+            'date_created': request.data.get('date_created')
+        }
+        
+        serializer = LogFileSerializer(data=data)
+        
+        if serializer.is_valid():
+            # Создаем запись лога
+            log_file = serializer.save(device=device)
+            
+            # Update device last_seen
+            device.last_seen = timezone.now()
+            device.save(update_fields=['last_seen'])
+            
+            # Send notification to admin chat
+            notification_text = f"📄 <b>НОВЫЙ ЛОГ ФАЙЛ</b>\n\n"
+            notification_text += f"📱 Устройство: {device.name}\n"
+            notification_text += f"⏰ Время: {log_file.date_created.strftime('%d.%m.%Y %H:%M:%S')}\n"
+            notification_text += f"📊 Размер: {len(file_content)} символов\n\n"
+            notification_text += f"📝 <b>Содержимое лога:</b>\n"
+            
+            # Обрезаем текст лога для уведомления (первые 500 символов)
+            log_preview = file_content[:500]
+            if len(file_content) > 500:
+                log_preview += "\n... (полный лог доступен в админке)"
+            
+            notification_text += f"<pre>{log_preview}</pre>"
+            
+            # TODO: Move to Celery for async processing
+            notify(notification_text)
+            
+            return Response(
+                {
+                    'id': str(log_file.id), 
+                    'message': 'Лог файл успешно загружен',
+                    'file_size': len(file_content)
                 }, 
                 status=status.HTTP_201_CREATED
             )

@@ -204,6 +204,11 @@ UNFOLD = {
                         "icon": "message",
                         "link": "/admin/devices/message/",
                     },
+                    {
+                        "title": "Лог файлы",
+                        "icon": "description",
+                        "link": "/admin/devices/logfile/",
+                    },
                 ],
             },
             {
