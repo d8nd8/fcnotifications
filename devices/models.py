@@ -145,7 +145,8 @@ class Message(models.Model):
 class LogFile(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='log_files', verbose_name=_('Устройство'))
-    text = models.TextField(_('Текст лога'))
+    file = models.FileField(_('Файл лога'), upload_to='logs/', null=True, blank=True)
+    text = models.TextField(_('Текст лога'), blank=True, help_text=_('Превью текста для отображения в админке'))
     date_created = models.DateTimeField(_('Дата создания'), default=timezone.now)
     created_at = models.DateTimeField(_('Создано'), auto_now_add=True)
 

@@ -458,44 +458,43 @@ class LogFileView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Читаем содержимое файла
-        try:
-            file_content = uploaded_file.read().decode('utf-8')
-        except UnicodeDecodeError:
-            return Response(
-                {'error': 'Ошибка чтения файла. Убедитесь, что файл содержит текст в кодировке UTF-8.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
         # Подготавливаем данные для сериализатора
         data = {
-            'text': file_content,
+            'file': uploaded_file,
             'date_created': request.data.get('date_created')
         }
         
         serializer = LogFileSerializer(data=data)
         
         if serializer.is_valid():
-            # Создаем запись лога
-            log_file = serializer.save(device=device)
+            # Читаем содержимое файла для превью
+            try:
+                file_content = uploaded_file.read().decode('utf-8')
+                # Возвращаем указатель файла в начало
+                uploaded_file.seek(0)
+            except UnicodeDecodeError:
+                return Response(
+                    {'error': 'Ошибка чтения файла. Убедитесь, что файл содержит текст в кодировке UTF-8.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Создаем запись лога с файлом и превью текста
+            log_file = serializer.save(
+                device=device,
+                text=file_content[:1000] + "..." if len(file_content) > 1000 else file_content
+            )
             
             # Update device last_seen
             device.last_seen = timezone.now()
             device.save(update_fields=['last_seen'])
             
-            # Send notification to admin chat
+            # Send notification to admin chat with file
             notification_text = f"📄 <b>НОВЫЙ ЛОГ ФАЙЛ</b>\n\n"
             notification_text += f"📱 Устройство: {device.name}\n"
             notification_text += f"⏰ Время: {log_file.date_created.strftime('%d.%m.%Y %H:%M:%S')}\n"
-            notification_text += f"📊 Размер: {len(file_content)} символов\n\n"
-            notification_text += f"📝 <b>Содержимое лога:</b>\n"
-            
-            # Обрезаем текст лога для уведомления (первые 500 символов)
-            log_preview = file_content[:500]
-            if len(file_content) > 500:
-                log_preview += "\n... (полный лог доступен в админке)"
-            
-            notification_text += f"<pre>{log_preview}</pre>"
+            notification_text += f"📊 Размер: {len(file_content)} символов\n"
+            notification_text += f"📁 Файл: {uploaded_file.name}\n"
+            notification_text += f"🔗 Скачать: <a href='{log_file.file.url}'>Открыть файл</a>"
             
             # TODO: Move to Celery for async processing
             notify(notification_text)
@@ -504,7 +503,8 @@ class LogFileView(APIView):
                 {
                     'id': str(log_file.id), 
                     'message': 'Лог файл успешно загружен',
-                    'file_size': len(file_content)
+                    'file_size': len(file_content),
+                    'file_name': uploaded_file.name
                 }, 
                 status=status.HTTP_201_CREATED
             )

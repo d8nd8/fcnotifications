@@ -66,7 +66,8 @@ def dashboard_callback(request, context):
         {
             "device_name": l.device.name,
             "device_id": str(l.device.id),
-            "text_preview": l.text[:100] + "..." if len(l.text) > 100 else l.text,
+            "file_name": l.file.name.split('/')[-1] if l.file else "No file",
+            "file_url": l.file.url if l.file else None,
             "date_created": l.date_created,
         }
         for l in recent_logs_qs
@@ -329,20 +330,14 @@ class AuthTokenAdmin(ModelAdmin):
 
 @admin.register(LogFile)
 class LogFileAdmin(ModelAdmin):
-    list_display = ['device', 'text_preview', 'date_created', 'created_at']
-    list_filter = ['date_created', 'created_at', 'device']
-    search_fields = ['device__name', 'text']
-    readonly_fields = ['id', 'created_at', 'text_preview']
+    list_display = ['device_name', 'file', 'date_created']
+    list_filter = ['date_created', 'device']
+    search_fields = ['device__name', 'file']
+    readonly_fields = ['id', 'created_at', 'device_name']
     list_per_page = 25
     
-    def text_preview(self, obj):
-        """Показывает превью текста лога"""
-        text = obj.text
-        if len(text) > 100:
-            text = text[:100] + '...'
-        return format_html(
-            '<div style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: pre-wrap; font-family: monospace; font-size: 12px; background: #f5f5f5; padding: 8px; border-radius: 4px;">{}</div>',
-            text
-        )
-    text_preview.short_description = _('Текст лога')
+    def device_name(self, obj):
+        """Показывает название устройства"""
+        return obj.device.name
+    device_name.short_description = _('Устройство')
 

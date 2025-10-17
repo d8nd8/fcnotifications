@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Device, BatteryReport, Message, LogFile
 from django.utils import timezone
+from datetime import timedelta
 from drf_yasg import openapi
 
 
@@ -43,8 +44,11 @@ class BatteryReportSerializer(serializers.ModelSerializer):
         return value
     
     def validate_date_created(self, value):
-        if value and value > timezone.now():
-            raise serializers.ValidationError("Дата создания не может быть в будущем")
+        if value:
+            # Добавляем буфер в 1 час для учета разницы часовых поясов
+            now_plus_buffer = timezone.now() + timedelta(hours=1)
+            if value > now_plus_buffer:
+                raise serializers.ValidationError("Дата создания не может быть в будущем")
         return value
 
 
@@ -76,8 +80,11 @@ class MessageSerializer(serializers.ModelSerializer):
         fields = ['date_created', 'sender', 'text', 'package_name']
     
     def validate_date_created(self, value):
-        if value and value > timezone.now():
-            raise serializers.ValidationError("Дата создания не может быть в будущем")
+        if value:
+            # Добавляем буфер в 1 час для учета разницы часовых поясов
+            now_plus_buffer = timezone.now() + timedelta(hours=1)
+            if value > now_plus_buffer:
+                raise serializers.ValidationError("Дата создания не может быть в будущем")
         return value
 
 
@@ -85,8 +92,12 @@ class LogFileSerializer(serializers.ModelSerializer):
     """
     Сериализатор для модели LogFile
     """
+    file = serializers.FileField(
+        help_text="Файл лога для загрузки"
+    )
     text = serializers.CharField(
-        help_text="Текст лога из загруженного файла"
+        required=False,
+        help_text="Превью текста лога (генерируется автоматически)"
     )
     date_created = serializers.DateTimeField(
         required=False,
@@ -95,9 +106,12 @@ class LogFileSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = LogFile
-        fields = ['text', 'date_created']
+        fields = ['file', 'text', 'date_created']
     
     def validate_date_created(self, value):
-        if value and value > timezone.now():
-            raise serializers.ValidationError("Дата создания не может быть в будущем")
+        if value:
+            # Добавляем буфер в 1 час для учета разницы часовых поясов
+            now_plus_buffer = timezone.now() + timedelta(hours=1)
+            if value > now_plus_buffer:
+                raise serializers.ValidationError("Дата создания не может быть в будущем")
         return value
