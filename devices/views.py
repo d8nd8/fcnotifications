@@ -6,7 +6,7 @@ from django.utils import timezone
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from .models import Device, BatteryReport, Message, LogFile
-from .serializers import DeviceSerializer, BatteryReportSerializer, MessageSerializer, LogFileSerializer
+from .serializers import DeviceSerializer, MessageSerializer, LogFileSerializer
 from .notifications import notify
 from .notification_filter import NotificationFilterService
 
@@ -71,55 +71,54 @@ class DeviceView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-class BatteryReportView(APIView):
+class SimpleBatteryReportView(APIView):
     """
-    Отправка отчета о состоянии батареи
+    Простая отправка отчета о батарее (без аутентификации)
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = []  # Убираем требование аутентификации
     
     @swagger_auto_schema(
-        operation_summary="🔋 Отправить отчет о батарее",
+        operation_summary="🔋 Отправить отчет о батарее (простой)",
         operation_description="""
-        Создает новый отчет о состоянии батареи устройства.
-        
-        **Аутентификация**: Требуется заголовок `X-TOKEN` с токеном устройства.
+        Простая отправка отчета о батарее без аутентификации.
         
         **Использование**:
-        - Отправка keep-alive сигналов от устройства
-        - Мониторинг уровня заряда батареи
-        - Обновление времени последней активности устройства
+        - Быстрая отправка данных о батарее
+        - Тестирование API
+        - Отправка от имени конкретного устройства по токену
         
-        **Автоматические действия**:
-        - Обновление `last_seen` устройства на текущее время
-        - Сохранение отчета в базе данных
+        **Параметры**:
+        - `token` - токен устройства (обязательно)
+        - `battery_level` - уровень батареи 0-100 (обязательно)
         """,
         tags=['Мониторинг батареи'],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['battery_level'],
+            required=['token', 'battery_level'],
             properties={
+                'token': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Токен устройства',
+                    example='6f4d3982-2a0c-460b-95d6-7daaaf2b6f39'
+                ),
                 'battery_level': openapi.Schema(
                     type=openapi.TYPE_INTEGER,
                     description='Уровень заряда батареи в процентах (0-100)',
                     minimum=0,
                     maximum=100,
                     example=85
-                ),
-                'date_created': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    format=openapi.FORMAT_DATETIME,
-                    description='Дата и время создания отчета (ISO 8601). Если не указано, используется текущее время',
-                    example='2024-01-15T14:30:25Z'
                 )
             }
         ),
         responses={
-            201: openapi.Response(
-                description="Отчет о батарее успешно создан",
+            200: openapi.Response(
+                description="Отчет о батарее успешно отправлен",
                 examples={
                     "application/json": {
-                        "id": "550e8400-e29b-41d4-a716-446655440001",
-                        "message": "Отчет о батарее успешно создан"
+                        "success": True,
+                        "message": "Отчет о батарее успешно отправлен",
+                        "device_name": "Мой iPhone",
+                        "battery_level": 85
                     }
                 }
             ),
@@ -127,48 +126,69 @@ class BatteryReportView(APIView):
                 description="Ошибка валидации данных",
                 examples={
                     "application/json": {
-                        "battery_level": ["Уровень батареи должен быть от 0 до 100"]
+                        "success": False,
+                        "error": "Неверный уровень батареи"
                     }
                 }
             ),
-            401: openapi.Response(
-                description="Неверный или отсутствующий токен аутентификации",
+            404: openapi.Response(
+                description="Устройство не найдено",
                 examples={
                     "application/json": {
-                        "detail": "Authentication credentials were not provided."
+                        "success": False,
+                        "error": "Устройство с таким токеном не найдено"
                     }
                 }
             )
-        },
-        manual_parameters=[
-            openapi.Parameter(
-                'X-TOKEN',
-                openapi.IN_HEADER,
-                description="Токен аутентификации устройства",
-                type=openapi.TYPE_STRING,
-                required=True,
-                example="abc123def456ghi789"
-            )
-        ]
+        }
     )
     def post(self, request):
-        device = request.user
-        serializer = BatteryReportSerializer(data=request.data)
+        token = request.data.get('token')
+        battery_level = request.data.get('battery_level')
         
-        if serializer.is_valid():
-            # Create battery report
-            battery_report = serializer.save(device=device)
-            
-            # Update device last_seen
-            device.last_seen = timezone.now()
-            device.save(update_fields=['last_seen'])
-            
-            return Response(
-                {'id': str(battery_report.id), 'message': 'Отчет о батарее успешно создан'}, 
-                status=status.HTTP_201_CREATED
-            )
+        if not token:
+            return Response({
+                'success': False,
+                'error': 'Токен устройства обязателен'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if not battery_level or not isinstance(battery_level, int):
+            return Response({
+                'success': False,
+                'error': 'Уровень батареи обязателен и должен быть числом'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if battery_level < 0 or battery_level > 100:
+            return Response({
+                'success': False,
+                'error': 'Уровень батареи должен быть от 0 до 100'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            device = Device.objects.get(token=token)
+        except Device.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Устройство с таким токеном не найдено'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Создаем отчет о батарее
+        battery_report = BatteryReport.objects.create(
+            device=device,
+            battery_level=battery_level
+        )
+        
+        # Обновляем last_seen устройства
+        device.last_seen = timezone.now()
+        device.save(update_fields=['last_seen'])
+        
+        return Response({
+            'success': True,
+            'message': 'Отчет о батарее успешно отправлен',
+            'device_name': device.name,
+            'battery_level': battery_level,
+            'report_id': str(battery_report.id)
+        }, status=status.HTTP_200_OK)
 
 
 class MessageView(APIView):

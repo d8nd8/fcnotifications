@@ -24,7 +24,9 @@ def dashboard_callback(request, context):
     
     # Статистика устройств
     total_devices = Device.objects.count()
-    online_devices = Device.objects.filter(last_seen__gte=yesterday).count()
+    # Считаем онлайн устройствами те, что были активны менее 24 часов назад
+    online_threshold = now - timedelta(hours=24)
+    online_devices = Device.objects.filter(last_seen__gte=online_threshold).count()
     offline_devices = total_devices - online_devices
     
     # Статистика сообщений
@@ -151,10 +153,26 @@ class DeviceAdmin(ModelAdmin):
     
     def status_badge(self, obj):
         """Показывает статус устройства"""
-        if obj.last_seen:
+        # Используем ту же логику, что и в дашборде
+        now = timezone.now()
+        time_threshold = now - timedelta(hours=24)
+        
+        if obj.last_seen and obj.last_seen >= time_threshold:
             return format_html(
                 '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🟢 Онлайн</span>'
             )
+        elif obj.last_seen:
+            # Устройство было активно, но давно
+            hours_ago = int((now - obj.last_seen).total_seconds() / 3600)
+            if hours_ago < 24:
+                return format_html(
+                    '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🟢 Онлайн</span>'
+                )
+            else:
+                return format_html(
+                    '<span style="background: #ff9800; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🟡 {}ч назад</span>',
+                    hours_ago
+                )
         else:
             return format_html(
                 '<span style="background: #f44336; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🔴 Офлайн</span>'

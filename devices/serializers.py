@@ -20,38 +20,6 @@ class DeviceSerializer(serializers.ModelSerializer):
         fields = ['id', 'token', 'name', 'last_seen', 'created_at']
 
 
-class BatteryReportSerializer(serializers.ModelSerializer):
-    """
-    Сериализатор для модели BatteryReport
-    """
-    battery_level = serializers.IntegerField(
-        min_value=0, 
-        max_value=100,
-        help_text="Уровень заряда батареи в процентах (0-100)"
-    )
-    date_created = serializers.DateTimeField(
-        required=False,
-        help_text="Дата и время создания отчета (ISO 8601). Если не указано, используется текущее время"
-    )
-    
-    class Meta:
-        model = BatteryReport
-        fields = ['battery_level', 'date_created']
-    
-    def validate_battery_level(self, value):
-        if value < 0 or value > 100:
-            raise serializers.ValidationError("Уровень батареи должен быть от 0 до 100")
-        return value
-    
-    def validate_date_created(self, value):
-        if value:
-            # Добавляем буфер в 1 час для учета разницы часовых поясов
-            now_plus_buffer = timezone.now() + timedelta(hours=1)
-            if value > now_plus_buffer:
-                raise serializers.ValidationError("Дата создания не может быть в будущем")
-        return value
-
-
 class MessageSerializer(serializers.ModelSerializer):
     """
     Сериализатор для модели Message
