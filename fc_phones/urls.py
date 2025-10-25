@@ -40,16 +40,6 @@ schema_view = get_schema_view(
         - `401` - Неверный токен аутентификации
         - `500` - Внутренняя ошибка сервера
         """,
-        terms_of_service="https://your-domain.com/terms/",
-        contact=openapi.Contact(
-            name="FC Phones Support",
-            email="support@fc-phones.com",
-            url="https://your-domain.com/contact/"
-        ),
-        license=openapi.License(
-            name="MIT License",
-            url="https://opensource.org/licenses/MIT"
-        ),
     ),
     public=True,
     permission_classes=(permissions.AllowAny,),

@@ -203,9 +203,9 @@ UNFOLD = {
                         "link": "/admin/devices/authtoken/",
                     },
                     {
-                        "title": "Отчеты о батарее",
-                        "icon": "battery_charging_full",
-                        "link": "/admin/devices/batteryreport/",
+                        "title": "Отчеты о статусе устройств",
+                        "icon": "analytics",
+                        "link": "/admin/devices/devicestatus/",
                     },
                     {
                         "title": "Сообщения",
@@ -216,6 +216,11 @@ UNFOLD = {
                         "title": "Лог файлы",
                         "icon": "description",
                         "link": "/admin/devices/logfile/",
+                    },
+                    {
+                        "title": "Фильтры уведомлений",
+                        "icon": "filter_list",
+                        "link": "/admin/devices/notificationfilter/",
                     },
                 ],
             },

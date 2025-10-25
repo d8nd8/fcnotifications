@@ -11,7 +11,7 @@ from django.http import HttpRequest
 from datetime import timedelta
 from unfold.admin import ModelAdmin
 from unfold.decorators import action
-from .models import Device, BatteryReport, Message, TelegramUser, NotificationFilter, AuthToken, LogFile
+from .models import Device, Message, TelegramUser, NotificationFilter, AuthToken, LogFile, DeviceStatus
 import secrets
 import string
 
@@ -34,14 +34,38 @@ def dashboard_callback(request, context):
     today_messages = Message.objects.filter(created_at__gte=yesterday).count()
     week_messages = Message.objects.filter(created_at__gte=week_ago).count()
     
-    # Статистика батареи
-    recent_battery_reports = BatteryReport.objects.filter(created_at__gte=yesterday)
-    low_battery_devices = recent_battery_reports.filter(battery_level__lt=20).count()
+    # Статистика батареи (из отчетов о статусе)
+    recent_status_reports = DeviceStatus.objects.filter(created_at__gte=yesterday)
+    low_battery_devices = recent_status_reports.filter(battery_level__lt=20).count()
     
     # Статистика логов
     total_logs = LogFile.objects.count()
     today_logs = LogFile.objects.filter(created_at__gte=yesterday).count()
     week_logs = LogFile.objects.filter(created_at__gte=week_ago).count()
+    
+    # Статистика статусов устройств
+    success_status = recent_status_reports.filter(status_level='SUCCESS').count()
+    attention_status = recent_status_reports.filter(status_level='ATTENTION').count()
+    error_status = recent_status_reports.filter(status_level='ERROR').count()
+    
+    # Последние отчеты о статусе
+    recent_status_qs = (
+        DeviceStatus.objects.select_related("device")
+        .order_by("-date_created")[:10]
+    )
+    recent_status = [
+        {
+            "device_name": s.device.name,
+            "device_id": str(s.device.id),
+            "status_level": s.status_level,
+            "battery_level": s.battery_level,
+            "is_charging": s.is_charging,
+            "network_available": s.network_available,
+            "reasons": s.reasons,
+            "date_created": s.date_created,
+        }
+        for s in recent_status_qs
+    ]
     
     # Последние сообщения (лог)
     recent_messages_qs = (
@@ -88,8 +112,12 @@ def dashboard_callback(request, context):
         'logs_total': total_logs,
         'logs_today': today_logs,
         'logs_week': week_logs,
+        'success_status': success_status,
+        'attention_status': attention_status,
+        'error_status': error_status,
         'recent_messages': recent_messages,
         'recent_logs': recent_logs,
+        'recent_status': recent_status,
     })
     
     return context
@@ -180,34 +208,7 @@ class DeviceAdmin(ModelAdmin):
     status_badge.short_description = _('Статус')
 
 
-@admin.register(BatteryReport)
-class BatteryReportAdmin(ModelAdmin):
-    list_display = ['device', 'battery_level_display', 'date_created', 'created_at']
-    list_filter = ['date_created', 'created_at', 'battery_level']
-    search_fields = ['device__name', 'device__token']
-    readonly_fields = ['id', 'created_at']
-    list_per_page = 25
-    
-    def battery_level_display(self, obj):
-        """Отображает уровень батареи с цветовой индикацией"""
-        level = obj.battery_level
-        if level > 50:
-            color = '#4CAF50'  # Зеленый
-        elif level > 20:
-            color = '#FF9800'  # Оранжевый
-        else:
-            color = '#f44336'  # Красный
-            
-        return format_html(
-            '<div style="display: flex; align-items: center;">'
-            '<div style="width: 60px; background: #e0e0e0; height: 8px; border-radius: 4px; margin-right: 8px;">'
-            '<div style="width: {}%; background: {}; height: 100%; border-radius: 4px;"></div>'
-            '</div>'
-            '<span style="font-weight: bold; color: {};">{}%</span>'
-            '</div>',
-            level, color, color, level
-        )
-    battery_level_display.short_description = _('Уровень батареи')
+# BatteryReportAdmin удален - функциональность перенесена в DeviceStatusAdmin
 
 
 @admin.register(Message)
@@ -358,4 +359,242 @@ class LogFileAdmin(ModelAdmin):
         """Показывает название устройства"""
         return obj.device.name
     device_name.short_description = _('Устройство')
+
+
+@admin.register(DeviceStatus)
+class DeviceStatusAdmin(ModelAdmin):
+    list_display = ['device', 'status_badge', 'battery_level_display', 'is_charging_badge', 
+                   'network_available_badge', 'unsent_notifications', 'app_version_display', 
+                   'android_version_display', 'device_model', 'date_created']
+    list_filter = ['status_level', 'is_charging', 'network_available', 'date_created', 'created_at', 
+                   'device_model', 'app_version', 'android_version']
+    search_fields = ['device__name', 'device__token', 'app_version', 'android_version', 'device_model']
+    readonly_fields = ['id', 'created_at', 'reasons_display', 'timestamp_display', 'last_notification_display']
+    list_per_page = 25
+    ordering = ['-date_created']
+    actions_list = ['export_status_reports', 'mark_as_attention']
+    
+    # Группировка полей в детальной странице
+    fieldsets = (
+        ('📱 Информация об устройстве', {
+            'fields': ('device', 'device_model', 'app_version', 'android_version')
+        }),
+        ('📊 Статус и причины', {
+            'fields': ('status_level', 'reasons_display')
+        }),
+        ('🔋 Состояние батареи', {
+            'fields': ('battery_level', 'is_charging')
+        }),
+        ('🌐 Сетевая информация', {
+            'fields': ('network_available', 'unsent_notifications', 'last_notification_display')
+        }),
+        ('⏰ Временные метки', {
+            'fields': ('timestamp_display', 'date_created', 'created_at')
+        }),
+        ('🔧 Техническая информация', {
+            'fields': ('id',),
+            'classes': ('collapse',)
+        })
+    )
+    
+    def status_badge(self, obj):
+        """Показывает статус устройства с цветовой индикацией"""
+        status_colors = {
+            'SUCCESS': '#4CAF50',  # Зеленый
+            'ATTENTION': '#FF9800',  # Оранжевый
+            'ERROR': '#f44336'  # Красный
+        }
+        status_icons = {
+            'SUCCESS': '✅',
+            'ATTENTION': '⚠️',
+            'ERROR': '❌'
+        }
+        
+        color = status_colors.get(obj.status_level, '#9e9e9e')
+        icon = status_icons.get(obj.status_level, '❓')
+        
+        return format_html(
+            '<span style="background: {}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold;">{} {}</span>',
+            color, icon, obj.get_status_level_display()
+        )
+    status_badge.short_description = _('Статус')
+    
+    def battery_level_display(self, obj):
+        """Отображает уровень батареи с цветовой индикацией"""
+        level = obj.battery_level
+        charging_icon = '🔌' if obj.is_charging else '🔋'
+        
+        if level > 50:
+            color = '#4CAF50'  # Зеленый
+        elif level > 20:
+            color = '#FF9800'  # Оранжевый
+        else:
+            color = '#f44336'  # Красный
+            
+        return format_html(
+            '<div style="display: flex; align-items: center;">'
+            '<div style="width: 60px; background: #e0e0e0; height: 8px; border-radius: 4px; margin-right: 8px;">'
+            '<div style="width: {}%; background: {}; height: 100%; border-radius: 4px;"></div>'
+            '</div>'
+            '<span style="font-weight: bold; color: {};">{}% {}</span>'
+            '</div>',
+            level, color, color, level, charging_icon
+        )
+    battery_level_display.short_description = _('Батарея')
+    
+    def is_charging_badge(self, obj):
+        """Показывает статус зарядки"""
+        if obj.is_charging:
+            return format_html(
+                '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🔌 Заряжается</span>'
+            )
+        else:
+            return format_html(
+                '<span style="background: #9e9e9e; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🔋 Не заряжается</span>'
+            )
+    is_charging_badge.short_description = _('Зарядка')
+    
+    def network_available_badge(self, obj):
+        """Показывает статус сети"""
+        if obj.network_available:
+            return format_html(
+                '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🌐 Онлайн</span>'
+            )
+        else:
+            return format_html(
+                '<span style="background: #f44336; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">❌ Офлайн</span>'
+            )
+    network_available_badge.short_description = _('Сеть')
+    
+    def reasons_display(self, obj):
+        """Показывает причины статуса в читаемом виде"""
+        if not obj.reasons:
+            return "Нет причин"
+        
+        reasons_html = '<ul style="margin: 0; padding-left: 20px;">'
+        for reason in obj.reasons:
+            reasons_html += f'<li style="margin-bottom: 4px;">{reason}</li>'
+        reasons_html += '</ul>'
+        
+        return format_html(reasons_html)
+    reasons_display.short_description = _('Причины статуса')
+    
+    def timestamp_display(self, obj):
+        """Показывает timestamp в читаемом виде"""
+        from datetime import datetime
+        try:
+            dt = datetime.fromtimestamp(obj.timestamp / 1000)
+            return dt.strftime('%d.%m.%Y %H:%M:%S')
+        except (ValueError, TypeError):
+            return "Неверный timestamp"
+    timestamp_display.short_description = _('Время отчёта')
+    
+    def app_version_display(self, obj):
+        """Показывает версию приложения"""
+        if obj.app_version:
+            return format_html(
+                '<span style="background: #e3f2fd; color: #1976d2; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-family: monospace;">{}</span>',
+                obj.app_version
+            )
+        return "—"
+    app_version_display.short_description = _('Версия приложения')
+    
+    def android_version_display(self, obj):
+        """Показывает версию Android"""
+        if obj.android_version:
+            return format_html(
+                '<span style="background: #e8f5e8; color: #2e7d32; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-family: monospace;">{}</span>',
+                obj.android_version
+            )
+        return "—"
+    android_version_display.short_description = _('Android версия')
+    
+    def last_notification_display(self, obj):
+        """Показывает время последнего уведомления"""
+        if obj.last_notification_timestamp:
+            return format_html(
+                '<span style="color: #666; font-size: 12px;">{}</span>',
+                obj.last_notification_timestamp.strftime('%d.%m.%Y %H:%M:%S')
+            )
+        return format_html(
+            '<span style="color: #999; font-style: italic;">Нет данных</span>'
+        )
+    last_notification_display.short_description = _('Последнее уведомление')
+    
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('device')
+    
+    @action(description=_("📊 Экспорт отчетов о статусе"), url_path="export-status", permissions=["view"])
+    def export_status_reports(self, request: HttpRequest):
+        """Экспортирует выбранные отчеты о статусе в CSV"""
+        try:
+            import csv
+            from django.http import HttpResponse
+            
+            # Получаем выбранные объекты из сессии
+            selected_ids = request.session.get('selected_status_ids', [])
+            if not selected_ids:
+                messages.warning(request, 'Не выбрано ни одного отчета для экспорта')
+                return redirect(reverse('admin:devices_devicestatus_changelist'))
+            
+            # Получаем объекты
+            status_reports = DeviceStatus.objects.filter(id__in=selected_ids).select_related('device')
+            
+            # Создаем HTTP ответ с CSV
+            response = HttpResponse(content_type='text/csv; charset=utf-8')
+            response['Content-Disposition'] = 'attachment; filename="device_status_reports.csv"'
+            
+            # Создаем CSV writer
+            writer = csv.writer(response)
+            
+            # Заголовки
+            writer.writerow([
+                'Устройство', 'Статус', 'Батарея %', 'Заряжается', 'Сеть', 
+                'Неотправленных', 'Версия приложения', 'Android версия', 
+                'Модель устройства', 'Причины', 'Дата создания'
+            ])
+            
+            # Данные
+            for report in status_reports:
+                writer.writerow([
+                    report.device.name,
+                    report.get_status_level_display(),
+                    report.battery_level,
+                    'Да' if report.is_charging else 'Нет',
+                    'Да' if report.network_available else 'Нет',
+                    report.unsent_notifications,
+                    report.app_version or '',
+                    report.android_version or '',
+                    report.device_model or '',
+                    '; '.join(report.reasons) if report.reasons else '',
+                    report.date_created.strftime('%d.%m.%Y %H:%M:%S')
+                ])
+            
+            messages.success(request, f'Экспортировано {len(status_reports)} отчетов')
+            return response
+            
+        except Exception as e:
+            messages.error(request, f'Ошибка при экспорте: {str(e)}')
+            return redirect(reverse('admin:devices_devicestatus_changelist'))
+    
+    @action(description=_("⚠️ Пометить как требующие внимания"), url_path="mark-attention", permissions=["change"])
+    def mark_as_attention(self, request: HttpRequest):
+        """Помечает выбранные отчеты как требующие внимания"""
+        try:
+            selected_ids = request.session.get('selected_status_ids', [])
+            if not selected_ids:
+                messages.warning(request, 'Не выбрано ни одного отчета')
+                return redirect(reverse('admin:devices_devicestatus_changelist'))
+            
+            # Обновляем статус
+            updated_count = DeviceStatus.objects.filter(id__in=selected_ids).update(
+                status_level='ATTENTION'
+            )
+            
+            messages.success(request, f'Обновлено {updated_count} отчетов')
+            
+        except Exception as e:
+            messages.error(request, f'Ошибка при обновлении: {str(e)}')
+        
+        return redirect(reverse('admin:devices_devicestatus_changelist'))
 

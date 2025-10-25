@@ -158,3 +158,103 @@ class LogFile(models.Model):
         verbose_name_plural = _('Лог файлы')
         ordering = ['-date_created']
 
+
+class DeviceStatus(models.Model):
+    """
+    Модель для хранения расширенной информации о статусе устройства
+    """
+    STATUS_CHOICES = [
+        ('SUCCESS', 'SUCCESS - Всё хорошо'),
+        ('ATTENTION', 'ATTENTION - Требуется внимание'),
+        ('ERROR', 'ERROR - Критическая ошибка'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='status_reports', verbose_name=_('Устройство'))
+    
+    # Основные поля статуса
+    status_level = models.CharField(
+        _('Статус устройства'), 
+        max_length=20, 
+        choices=STATUS_CHOICES,
+        help_text=_('Общий статус устройства')
+    )
+    reasons = models.JSONField(
+        _('Причины статуса'), 
+        default=list, 
+        blank=True,
+        help_text=_('Список текстовых причин текущего состояния')
+    )
+    
+    # Информация о батарее
+    battery_level = models.IntegerField(
+        _('Уровень батареи'), 
+        help_text=_('Уровень заряда батареи в процентах (0-100)')
+    )
+    is_charging = models.BooleanField(
+        _('Заряжается'), 
+        default=False,
+        help_text=_('Заряжается ли устройство сейчас')
+    )
+    
+    # Сетевая информация
+    network_available = models.BooleanField(
+        _('Доступ к интернету'), 
+        default=True,
+        help_text=_('Есть ли доступ к интернету')
+    )
+    
+    # Информация об уведомлениях
+    unsent_notifications = models.IntegerField(
+        _('Неотправленные уведомления'), 
+        default=0,
+        help_text=_('Количество неотправленных уведомлений')
+    )
+    last_notification_timestamp = models.DateTimeField(
+        _('Последнее уведомление'), 
+        null=True, 
+        blank=True,
+        help_text=_('Время последнего полученного уведомления')
+    )
+    
+    # Техническая информация
+    timestamp = models.BigIntegerField(
+        _('Время отчёта (UNIX)'), 
+        help_text=_('Время формирования отчёта в миллисекундах UNIX')
+    )
+    app_version = models.CharField(
+        _('Версия приложения'), 
+        max_length=50, 
+        blank=True,
+        help_text=_('Версия мобильного приложения')
+    )
+    android_version = models.CharField(
+        _('Версия Android'), 
+        max_length=50, 
+        blank=True,
+        help_text=_('Версия операционной системы Android')
+    )
+    device_model = models.CharField(
+        _('Модель устройства'), 
+        max_length=255, 
+        blank=True,
+        help_text=_('Модель устройства (например, Samsung Galaxy S23)')
+    )
+    
+    # Метаданные
+    date_created = models.DateTimeField(_('Дата создания'), default=timezone.now)
+    created_at = models.DateTimeField(_('Создано'), auto_now_add=True)
+
+    def __str__(self):
+        return f"Status {self.status_level} - {self.device.name} ({self.date_created.strftime('%d.%m.%Y %H:%M')})"
+
+    class Meta:
+        verbose_name = _('Статус устройства')
+        verbose_name_plural = _('Статусы устройств')
+        ordering = ['-date_created']
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.battery_level < 0 or self.battery_level > 100:
+            raise ValidationError('Battery level must be between 0 and 100')
+
