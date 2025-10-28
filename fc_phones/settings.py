@@ -137,16 +137,8 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50 MB
 
 UNFOLD = {
     "SITE_URL": "/",
-    "SITE_TITLE": "FC Phones - Сервис Алертов",
-    "SITE_ICON": {
-        "light": lambda request: static("icon-light.svg"),
-        "dark": lambda request: static("icon-dark.svg"),
-    },
-    "SITE_LOGO": {
-        "light": lambda request: static("logo-light.svg"),
-        "dark": lambda request: static("logo-dark.svg"),
-    },
     "SITE_SYMBOL": "📱",
+    "SITE_HEADER": "FC Phones",
     "BORDER_RADIUS": "10px",
     "DASHBOARD_CALLBACK": "devices.admin.dashboard_callback",
     "SHOW_HISTORY": False,
@@ -188,22 +180,7 @@ UNFOLD = {
             {
                 "items": [
                     {
-                        "title": "Список устройств",
-                        "icon": "phone",
-                        "link": "/admin/devices/device/",
-                    },
-                    {
-                        "title": "Пользователи Telegram",
-                        "icon": "people",
-                        "link": "/admin/devices/telegramuser/",
-                    },
-                    {
-                        "title": "Токены авторизации",
-                        "icon": "key",
-                        "link": "/admin/devices/authtoken/",
-                    },
-                    {
-                        "title": "Отчеты о статусе устройств",
+                        "title": "Статус устройств",
                         "icon": "analytics",
                         "link": "/admin/devices/devicestatus/",
                     },
@@ -221,6 +198,21 @@ UNFOLD = {
                         "title": "Фильтры уведомлений",
                         "icon": "filter_list",
                         "link": "/admin/devices/notificationfilter/",
+                    },
+                    {
+                        "title": "Токены устройств",
+                        "icon": "phone",
+                        "link": "/admin/devices/device/",
+                    },
+                    {
+                        "title": "Пользователи Telegram",
+                        "icon": "people",
+                        "link": "/admin/devices/telegramuser/",
+                    },
+                    {
+                        "title": "Токены авторизации",
+                        "icon": "key",
+                        "link": "/admin/devices/authtoken/",
                     },
                 ],
             },

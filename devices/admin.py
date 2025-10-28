@@ -38,6 +38,12 @@ def dashboard_callback(request, context):
     recent_status_reports = DeviceStatus.objects.filter(created_at__gte=yesterday)
     low_battery_devices = recent_status_reports.filter(battery_level__lt=20).count()
     
+    # Статистика зарядки
+    charging_devices = recent_status_reports.filter(is_charging=True).values('device').distinct().count()
+    
+    # Статистика сети
+    devices_with_network = recent_status_reports.filter(network_available=True).values('device').distinct().count()
+    
     # Статистика логов
     total_logs = LogFile.objects.count()
     today_logs = LogFile.objects.filter(created_at__gte=yesterday).count()
@@ -109,6 +115,8 @@ def dashboard_callback(request, context):
         'messages_today': today_messages,
         'messages_week': week_messages,
         'low_battery_count': low_battery_devices,
+        'charging_devices': charging_devices,
+        'devices_with_network': devices_with_network,
         'logs_total': total_logs,
         'logs_today': today_logs,
         'logs_week': week_logs,
@@ -213,11 +221,20 @@ class DeviceAdmin(ModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(ModelAdmin):
-    list_display = ['device', 'sender', 'package_name', 'filtered_badge', 'text_preview', 'date_created', 'created_at']
+    list_display = ['device_name', 'sender', 'package_name', 'text_preview']
     list_filter = ['date_created', 'created_at', 'is_filtered', 'package_name']
     search_fields = ['device__name', 'sender', 'text', 'package_name']
-    readonly_fields = ['id', 'created_at', 'text_preview', 'filtered_badge']
+    readonly_fields = ['id', 'created_at', 'text_preview']
     list_per_page = 25
+    
+    def device_name(self, obj):
+        """Показывает только имя устройства"""
+        return format_html(
+            '<span style="display: inline-block; min-width: 150px; font-weight: 500;">{}</span>',
+            obj.device.name
+        )
+    device_name.short_description = _('Устройство')
+    device_name.admin_order_field = 'device__name'
     
     def text_preview(self, obj):
         """Показывает превью текста сообщения"""
@@ -229,18 +246,6 @@ class MessageAdmin(ModelAdmin):
             text
         )
     text_preview.short_description = _('Текст сообщения')
-    
-    def filtered_badge(self, obj):
-        """Показывает статус фильтрации"""
-        if obj.is_filtered:
-            return format_html(
-                '<span style="background: #ff9800; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🚫 Отфильтровано</span>'
-            )
-        else:
-            return format_html(
-                '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">✅ Доставлено</span>'
-            )
-    filtered_badge.short_description = _('Статус')
 
 
 @admin.register(NotificationFilter)
@@ -363,8 +368,8 @@ class LogFileAdmin(ModelAdmin):
 
 @admin.register(DeviceStatus)
 class DeviceStatusAdmin(ModelAdmin):
-    list_display = ['device', 'status_badge', 'battery_level_display', 'is_charging_badge', 
-                   'network_available_badge', 'unsent_notifications', 'app_version_display', 
+    list_display = ['device_name', 'status_badge', 'battery_level_display', 'is_charging_badge', 
+                   'network_available_badge', 'app_version_display', 
                    'android_version_display', 'device_model', 'date_created']
     list_filter = ['status_level', 'is_charging', 'network_available', 'date_created', 'created_at', 
                    'device_model', 'app_version', 'android_version']
@@ -373,6 +378,15 @@ class DeviceStatusAdmin(ModelAdmin):
     list_per_page = 25
     ordering = ['-date_created']
     actions_list = ['export_status_reports', 'mark_as_attention']
+    
+    def device_name(self, obj):
+        """Показывает только имя устройства"""
+        return format_html(
+            '<span style="display: inline-block; min-width: 150px; font-weight: 500;">{}</span>',
+            obj.device.name
+        )
+    device_name.short_description = _('Устройство')
+    device_name.admin_order_field = 'device__name'
     
     # Группировка полей в детальной странице
     fieldsets = (
@@ -398,7 +412,7 @@ class DeviceStatusAdmin(ModelAdmin):
     )
     
     def status_badge(self, obj):
-        """Показывает статус устройства с цветовой индикацией"""
+        """Показывает только код статуса"""
         status_colors = {
             'SUCCESS': '#4CAF50',  # Зеленый
             'ATTENTION': '#FF9800',  # Оранжевый
@@ -414,8 +428,8 @@ class DeviceStatusAdmin(ModelAdmin):
         icon = status_icons.get(obj.status_level, '❓')
         
         return format_html(
-            '<span style="background: {}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold;">{} {}</span>',
-            color, icon, obj.get_status_level_display()
+            '<span style="background: {}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; white-space: nowrap;">{} {}</span>',
+            color, icon, obj.status_level
         )
     status_badge.short_description = _('Статус')
     
@@ -446,11 +460,11 @@ class DeviceStatusAdmin(ModelAdmin):
         """Показывает статус зарядки"""
         if obj.is_charging:
             return format_html(
-                '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🔌 Заряжается</span>'
+                '<span style="background: #4CAF50; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px; white-space: nowrap;">🔌 Заряжается</span>'
             )
         else:
             return format_html(
-                '<span style="background: #9e9e9e; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🔋 Не заряжается</span>'
+                '<span style="background: #9e9e9e; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px; white-space: nowrap;">🔋 Не заряжается</span>'
             )
     is_charging_badge.short_description = _('Зарядка')
     
@@ -458,11 +472,11 @@ class DeviceStatusAdmin(ModelAdmin):
         """Показывает статус сети"""
         if obj.network_available:
             return format_html(
-                '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🌐 Онлайн</span>'
+                '<span style="background: #4CAF50; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px; white-space: nowrap;">🌐 Онлайн</span>'
             )
         else:
             return format_html(
-                '<span style="background: #f44336; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">❌ Офлайн</span>'
+                '<span style="background: #f44336; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px; white-space: nowrap;">❌ Офлайн</span>'
             )
     network_available_badge.short_description = _('Сеть')
     
@@ -503,7 +517,7 @@ class DeviceStatusAdmin(ModelAdmin):
         """Показывает версию Android"""
         if obj.android_version:
             return format_html(
-                '<span style="background: #e8f5e8; color: #2e7d32; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-family: monospace;">{}</span>',
+                '<span style="background: #e8f5e8; color: #2e7d32; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: monospace; white-space: nowrap;">{}</span>',
                 obj.android_version
             )
         return "—"
