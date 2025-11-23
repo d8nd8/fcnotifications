@@ -335,21 +335,41 @@ class SimpleBatteryReportView(APIView):
             battery_level=battery_level
         )
         
-        # Создаем расширенный отчет о статусе устройства
-        device_status = DeviceStatus.objects.create(
-            device=device,
-            status_level=status_level,
-            reasons=reasons,
-            battery_level=battery_level,
-            is_charging=is_charging,
-            network_available=network_available,
-            unsent_notifications=unsent_notifications,
-            last_notification_timestamp=last_notification_timestamp,
-            timestamp=timestamp,
-            app_version=app_version,
-            android_version=android_version,
-            device_model=device_model
-        )
+        # Обновляем последний статус устройства вместо создания новой записи
+        # Находим последнюю запись статуса для этого устройства
+        device_status = DeviceStatus.objects.filter(device=device).order_by('-date_created').first()
+        
+        if device_status:
+            # Обновляем существующую запись
+            device_status.status_level = status_level
+            device_status.reasons = reasons
+            device_status.battery_level = battery_level
+            device_status.is_charging = is_charging
+            device_status.network_available = network_available
+            device_status.unsent_notifications = unsent_notifications
+            device_status.last_notification_timestamp = last_notification_timestamp
+            device_status.timestamp = timestamp
+            device_status.app_version = app_version
+            device_status.android_version = android_version
+            device_status.device_model = device_model
+            device_status.date_created = timezone.now()  # Обновляем время на текущее
+            device_status.save()
+        else:
+            # Создаем новую запись, если её нет
+            device_status = DeviceStatus.objects.create(
+                device=device,
+                status_level=status_level,
+                reasons=reasons,
+                battery_level=battery_level,
+                is_charging=is_charging,
+                network_available=network_available,
+                unsent_notifications=unsent_notifications,
+                last_notification_timestamp=last_notification_timestamp,
+                timestamp=timestamp,
+                app_version=app_version,
+                android_version=android_version,
+                device_model=device_model
+            )
         
         # Обновляем last_seen устройства
         device.last_seen = timezone.now()

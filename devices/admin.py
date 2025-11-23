@@ -11,6 +11,10 @@ from django.http import HttpRequest
 from datetime import timedelta
 from unfold.admin import ModelAdmin
 from unfold.decorators import action
+from unfold.contrib.filters.admin import (
+    RangeDateFilter,
+    RelatedDropdownFilter,
+)
 from .models import Device, Message, TelegramUser, NotificationFilter, AuthToken, LogFile, DeviceStatus
 import secrets
 import string
@@ -24,10 +28,35 @@ def dashboard_callback(request, context):
     
     # Статистика устройств
     total_devices = Device.objects.count()
-    # Считаем онлайн устройствами те, что были активны менее 24 часов назад
-    online_threshold = now - timedelta(hours=24)
-    online_devices = Device.objects.filter(last_seen__gte=online_threshold).count()
-    offline_devices = total_devices - online_devices
+    
+    # Определяем офлайн устройства по статусу: если последний DeviceStatus имеет network_available=False или status_level='ERROR'
+    # Получаем последний статус для каждого устройства
+    from django.db.models import OuterRef, Subquery
+    
+    latest_status = DeviceStatus.objects.filter(
+        device=OuterRef('pk')
+    ).order_by('-date_created')
+    
+    devices_with_status = Device.objects.annotate(
+        latest_network_available=Subquery(
+            latest_status.values('network_available')[:1]
+        ),
+        latest_status_level=Subquery(
+            latest_status.values('status_level')[:1]
+        )
+    )
+    
+    # Устройство офлайн, если:
+    # 1. У него нет DeviceStatus (latest_network_available is None)
+    # 2. Или latest_network_available=False
+    # 3. Или latest_status_level='ERROR'
+    offline_devices = devices_with_status.filter(
+        Q(latest_network_available__isnull=True) | 
+        Q(latest_network_available=False) | 
+        Q(latest_status_level='ERROR')
+    ).count()
+    
+    online_devices = total_devices - offline_devices
     
     # Статистика сообщений
     total_messages = Message.objects.count()
@@ -133,11 +162,11 @@ def dashboard_callback(request, context):
 
 @admin.register(Device)
 class DeviceAdmin(ModelAdmin):
-    list_display = ['id_display', 'name', 'token_display', 'status_badge', 'last_seen']
+    list_display = ['id_display', 'name', 'token_display', 'last_seen']
     list_display_links = ['id_display']  # Ссылка на детали через ID
     list_filter = ['created_at', 'last_seen']
     search_fields = ['name', 'token']
-    readonly_fields = ['id', 'token', 'created_at', 'status_badge']
+    readonly_fields = ['id', 'token', 'created_at']
     list_per_page = 25
     actions_list = ["create_devices_action"]
     
@@ -188,28 +217,22 @@ class DeviceAdmin(ModelAdmin):
     token_display.short_description = _('Токен')
     
     def status_badge(self, obj):
-        """Показывает статус устройства"""
-        # Используем ту же логику, что и в дашборде
-        now = timezone.now()
-        time_threshold = now - timedelta(hours=24)
+        """Показывает статус устройства на основе последнего DeviceStatus"""
+        # Получаем последний статус устройства
+        latest_status = obj.status_reports.order_by('-date_created').first()
         
-        if obj.last_seen and obj.last_seen >= time_threshold:
-            return format_html(
-                '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🟢 Онлайн</span>'
-            )
-        elif obj.last_seen:
-            # Устройство было активно, но давно
-            hours_ago = int((now - obj.last_seen).total_seconds() / 3600)
-            if hours_ago < 24:
+        if latest_status:
+            # Устройство офлайн, если network_available=False или status_level='ERROR'
+            if not latest_status.network_available or latest_status.status_level == 'ERROR':
                 return format_html(
-                    '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🟢 Онлайн</span>'
+                    '<span style="background: #f44336; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🔴 Офлайн</span>'
                 )
             else:
                 return format_html(
-                    '<span style="background: #ff9800; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🟡 {}ч назад</span>',
-                    hours_ago
+                    '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🟢 Онлайн</span>'
                 )
         else:
+            # Если нет статуса, считаем офлайн
             return format_html(
                 '<span style="background: #f44336; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px;">🔴 Офлайн</span>'
             )
@@ -221,11 +244,19 @@ class DeviceAdmin(ModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(ModelAdmin):
-    list_display = ['device_name', 'sender', 'package_name', 'text_preview']
-    list_filter = ['date_created', 'created_at', 'is_filtered', 'package_name']
-    search_fields = ['device__name', 'sender', 'text', 'package_name']
+    list_display = ['device_name', 'sender', 'date_created_display', 'package_name', 'text_preview']
+    list_filter = [
+        ('device', RelatedDropdownFilter),  # Дропдаун фильтр по устройству (ForeignKey)
+        ('date_created', RangeDateFilter),  # Unfold фильтр по дате
+        'package_name',  # Дропдаун фильтр по имени пакета (CharField - стандартный Django фильтр показывает уникальные значения)
+        'sender',
+        'is_filtered',
+    ]
+    search_fields = ['text', 'device__name']
     readonly_fields = ['id', 'created_at', 'text_preview']
     list_per_page = 25
+    list_filter_submit = True  # Добавляет кнопку "Применить" для фильтров
+    actions_list = ['clear_all_messages']
     
     def device_name(self, obj):
         """Показывает только имя устройства"""
@@ -235,6 +266,15 @@ class MessageAdmin(ModelAdmin):
         )
     device_name.short_description = _('Устройство')
     device_name.admin_order_field = 'device__name'
+    
+    def date_created_display(self, obj):
+        """Показывает дату получения SMS"""
+        return format_html(
+            '<span style="font-family: monospace; font-size: 12px; color: #6b7280;">{}</span>',
+            obj.date_created.strftime('%d.%m.%Y %H:%M:%S') if obj.date_created else '—'
+        )
+    date_created_display.short_description = _('Дата получения SMS')
+    date_created_display.admin_order_field = 'date_created'
     
     def text_preview(self, obj):
         """Показывает превью текста сообщения"""
@@ -246,6 +286,18 @@ class MessageAdmin(ModelAdmin):
             text
         )
     text_preview.short_description = _('Текст сообщения')
+    
+    @action(description=_("🗑️ Очистить все сообщения"), url_path="clear-all-messages", permissions=["delete"])
+    def clear_all_messages(self, request: HttpRequest):
+        """Удаляет все сообщения из базы данных"""
+        try:
+            count = Message.objects.count()
+            Message.objects.all().delete()
+            messages.success(request, f'✅ Успешно удалено {count} сообщений')
+        except Exception as e:
+            messages.error(request, f'❌ Ошибка при удалении сообщений: {str(e)}')
+        
+        return redirect(reverse('admin:devices_message_changelist'))
 
 
 @admin.register(NotificationFilter)
@@ -377,7 +429,6 @@ class DeviceStatusAdmin(ModelAdmin):
     readonly_fields = ['id', 'created_at', 'reasons_display', 'timestamp_display', 'last_notification_display']
     list_per_page = 25
     ordering = ['-date_created']
-    actions_list = ['export_status_reports', 'mark_as_attention']
     
     def device_name(self, obj):
         """Показывает только имя устройства"""
@@ -537,78 +588,4 @@ class DeviceStatusAdmin(ModelAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('device')
-    
-    @action(description=_("📊 Экспорт отчетов о статусе"), url_path="export-status", permissions=["view"])
-    def export_status_reports(self, request: HttpRequest):
-        """Экспортирует выбранные отчеты о статусе в CSV"""
-        try:
-            import csv
-            from django.http import HttpResponse
-            
-            # Получаем выбранные объекты из сессии
-            selected_ids = request.session.get('selected_status_ids', [])
-            if not selected_ids:
-                messages.warning(request, 'Не выбрано ни одного отчета для экспорта')
-                return redirect(reverse('admin:devices_devicestatus_changelist'))
-            
-            # Получаем объекты
-            status_reports = DeviceStatus.objects.filter(id__in=selected_ids).select_related('device')
-            
-            # Создаем HTTP ответ с CSV
-            response = HttpResponse(content_type='text/csv; charset=utf-8')
-            response['Content-Disposition'] = 'attachment; filename="device_status_reports.csv"'
-            
-            # Создаем CSV writer
-            writer = csv.writer(response)
-            
-            # Заголовки
-            writer.writerow([
-                'Устройство', 'Статус', 'Батарея %', 'Заряжается', 'Сеть', 
-                'Неотправленных', 'Версия приложения', 'Android версия', 
-                'Модель устройства', 'Причины', 'Дата создания'
-            ])
-            
-            # Данные
-            for report in status_reports:
-                writer.writerow([
-                    report.device.name,
-                    report.get_status_level_display(),
-                    report.battery_level,
-                    'Да' if report.is_charging else 'Нет',
-                    'Да' if report.network_available else 'Нет',
-                    report.unsent_notifications,
-                    report.app_version or '',
-                    report.android_version or '',
-                    report.device_model or '',
-                    '; '.join(report.reasons) if report.reasons else '',
-                    report.date_created.strftime('%d.%m.%Y %H:%M:%S')
-                ])
-            
-            messages.success(request, f'Экспортировано {len(status_reports)} отчетов')
-            return response
-            
-        except Exception as e:
-            messages.error(request, f'Ошибка при экспорте: {str(e)}')
-            return redirect(reverse('admin:devices_devicestatus_changelist'))
-    
-    @action(description=_("⚠️ Пометить как требующие внимания"), url_path="mark-attention", permissions=["change"])
-    def mark_as_attention(self, request: HttpRequest):
-        """Помечает выбранные отчеты как требующие внимания"""
-        try:
-            selected_ids = request.session.get('selected_status_ids', [])
-            if not selected_ids:
-                messages.warning(request, 'Не выбрано ни одного отчета')
-                return redirect(reverse('admin:devices_devicestatus_changelist'))
-            
-            # Обновляем статус
-            updated_count = DeviceStatus.objects.filter(id__in=selected_ids).update(
-                status_level='ATTENTION'
-            )
-            
-            messages.success(request, f'Обновлено {updated_count} отчетов')
-            
-        except Exception as e:
-            messages.error(request, f'Ошибка при обновлении: {str(e)}')
-        
-        return redirect(reverse('admin:devices_devicestatus_changelist'))
 

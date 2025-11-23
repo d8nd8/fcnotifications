@@ -23,6 +23,7 @@ ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=lamb
 # Application definition
 INSTALLED_APPS = [
     'unfold',  # Unfold должен быть перед django.contrib.admin
+    'unfold.contrib.filters',  # Unfold фильтры
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
