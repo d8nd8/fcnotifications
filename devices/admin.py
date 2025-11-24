@@ -434,7 +434,7 @@ class DeviceStatusAdmin(ModelAdmin):
     search_fields = ['device__name', 'device__token', 'app_version', 'android_version', 'device_model']
     readonly_fields = ['id', 'created_at', 'reasons_display', 'timestamp_display', 'last_notification_display']
     list_per_page = 25
-    ordering = ['-date_created']
+    ordering = ['device__name']
     
     def device_name(self, obj):
         """Показывает только имя устройства"""

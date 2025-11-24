@@ -209,10 +209,13 @@
 
     
 </div>
-{% endblock %}
-
-{% block extra_js %}
-{{ block.super }}
+<script>
+(function () {
+    const endpoint = "{% url 'latest-messages-admin' %}?limit=10";
+    const tbody = document.getElementById('recent-messages-body');
+    if (!tbody || !window.fetch) {
+        return;
+    }
 <script>
 (function () {
     const endpoint = "{% url 'latest-messages-admin' %}?limit=10";
