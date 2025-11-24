@@ -1,5 +1,5 @@
 {% extends "unfold/layouts/base_simple.html" %}
-{% load i18n unfold static %}
+{% load i18n unfold static tz %}
 
 {% block breadcrumbs %}{% endblock %}
 
@@ -166,7 +166,7 @@
                             </th>
                         </tr>
                     </thead>
-                    <tbody class="bg-white/90 dark:bg-transparent">
+                    <tbody class="bg-white/90 dark:bg-transparent" id="recent-messages-body">
                         {% if recent_messages %}
                             {% for m in recent_messages %}
                             <tr class="hover:bg-purple-50/70 dark:hover:bg-purple-950/40 transition-colors duration-150 border-b border-purple-100/50 dark:border-purple-900/50">
@@ -177,7 +177,7 @@
                                     </div>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap border-r border-purple-100/50 dark:border-purple-900/50">
-                                    <div class="text-sm text-gray-600 dark:text-gray-400 font-mono">{{ m.date_created|date:"d.m.Y H:i" }}</div>
+                                    <div class="text-sm text-gray-600 dark:text-gray-400 font-mono">{{ m.date_created|localtime|date:"d.m.Y H:i" }}</div>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap border-r border-purple-100/50 dark:border-purple-900/50">
                                     <div class="flex items-center gap-2">
@@ -192,7 +192,7 @@
                             </tr>
                             {% endfor %}
                         {% else %}
-                            <tr>
+                            <tr id="recent-messages-empty-row">
                                 <td class="px-6 py-12 text-center" colspan="4">
                                     <div class="flex flex-col items-center justify-center gap-2">
                                         <span class="text-4xl">📭</span>
@@ -209,4 +209,86 @@
 
     
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+(function () {
+    const endpoint = "{% url 'latest-messages-admin' %}?limit=10";
+    const tbody = document.getElementById('recent-messages-body');
+    if (!tbody || !window.fetch) {
+        return;
+    }
+
+    const emptyStateMarkup = `
+        <tr>
+            <td class="px-6 py-12 text-center" colspan="4">
+                <div class="flex flex-col items-center justify-center gap-2">
+                    <span class="text-4xl">📭</span>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 font-medium">Нет сообщений</p>
+                </div>
+            </td>
+        </tr>`;
+
+    const escapeHtml = (value = '') => {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    };
+
+    const rowTemplate = (msg) => `
+        <tr class="hover:bg-purple-50/70 dark:hover:bg-purple-950/40 transition-colors duration-150 border-b border-purple-100/50 dark:border-purple-900/50">
+            <td class="px-6 py-4 whitespace-nowrap border-r border-purple-100/50 dark:border-purple-900/50">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <div class="text-sm font-semibold text-gray-900 dark:text-white">${escapeHtml(msg.device_name)}</div>
+                </div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap border-r border-purple-100/50 dark:border-purple-900/50">
+                <div class="text-sm text-gray-600 dark:text-gray-400 font-mono">${escapeHtml(msg.date_created)}</div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap border-r border-purple-100/50 dark:border-purple-900/50">
+                <div class="flex items-center gap-2">
+                    <span class="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs font-medium rounded-full">
+                        ${escapeHtml(msg.sender)}
+                    </span>
+                </div>
+            </td>
+            <td class="px-6 py-4 border-r border-purple-100/50 dark:border-purple-900/50">
+                <div class="text-sm text-gray-700 dark:text-gray-200 max-w-xl truncate">${escapeHtml(msg.text)}</div>
+            </td>
+        </tr>`;
+
+    const renderMessages = (messages) => {
+        if (!messages.length) {
+            tbody.innerHTML = emptyStateMarkup;
+            return;
+        }
+
+        tbody.innerHTML = messages.map(rowTemplate).join('');
+    };
+
+    const fetchMessages = async () => {
+        try {
+            const response = await fetch(endpoint, {
+                headers: {'X-Requested-With': 'XMLHttpRequest'},
+            });
+            if (!response.ok) {
+                return;
+            }
+            const data = await response.json();
+            renderMessages(data.messages || []);
+        } catch (error) {
+            console.error('Не удалось загрузить сообщения', error);
+        }
+    };
+
+    fetchMessages();
+    setInterval(fetchMessages, 5000);
+})();
+</script>
 {% endblock %}

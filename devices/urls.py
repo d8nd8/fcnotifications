@@ -6,5 +6,6 @@ urlpatterns = [
     path('battery-report', views.SimpleBatteryReportView.as_view(), name='simple-battery'),
     path('mobile/message', views.MessageView.as_view(), name='message'),
     path('mobile/log', views.LogFileView.as_view(), name='log'),
+    path('admin/latest-messages', views.latest_messages_admin, name='latest-messages-admin'),
 ]
 

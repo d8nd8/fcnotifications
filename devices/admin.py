@@ -269,9 +269,15 @@ class MessageAdmin(ModelAdmin):
     
     def date_created_display(self, obj):
         """Показывает дату получения SMS"""
+        if not obj.date_created:
+            return format_html(
+                '<span style="font-family: monospace; font-size: 12px; color: #6b7280;">—</span>'
+            )
+
+        local_dt = timezone.localtime(obj.date_created)
         return format_html(
             '<span style="font-family: monospace; font-size: 12px; color: #6b7280;">{}</span>',
-            obj.date_created.strftime('%d.%m.%Y %H:%M:%S') if obj.date_created else '—'
+            local_dt.strftime('%d.%m.%Y %H:%M:%S')
         )
     date_created_display.short_description = _('Дата получения SMS')
     date_created_display.admin_order_field = 'date_created'

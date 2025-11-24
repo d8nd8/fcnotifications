@@ -3,6 +3,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
+from django.contrib.admin.views.decorators import staff_member_required
+from django.http import JsonResponse
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from .models import Device, BatteryReport, Message, LogFile, DeviceStatus
@@ -590,6 +592,37 @@ class MessageView(APIView):
             )
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@staff_member_required
+def latest_messages_admin(request):
+    """
+    Возвращает последние сообщения для обновления дашборда.
+    Доступно только администраторам.
+    """
+    limit = request.GET.get('limit')
+    try:
+        limit = int(limit) if limit else 10
+    except (TypeError, ValueError):
+        limit = 10
+    limit = max(1, min(limit, 50))
+    
+    messages_qs = (
+        Message.objects.select_related('device')
+        .order_by('-date_created')[:limit]
+    )
+    
+    payload = []
+    for msg in messages_qs:
+        local_dt = timezone.localtime(msg.date_created) if msg.date_created else None
+        payload.append({
+            'device_name': msg.device.name,
+            'date_created': local_dt.strftime('%d.%m.%Y %H:%M') if local_dt else '',
+            'sender': msg.sender,
+            'text': msg.text,
+        })
+    
+    return JsonResponse({'messages': payload})
 
 
 class LogFileView(APIView):
