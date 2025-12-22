@@ -258,3 +258,117 @@ class DeviceStatus(models.Model):
         if self.battery_level < 0 or self.battery_level > 100:
             raise ValidationError('Battery level must be between 0 and 100')
 
+
+class DiagnosticEvent(models.Model):
+    """
+    Модель для хранения диагностических событий от мобильных устройств
+    """
+    SEVERITY_CHOICES = [
+        ('INFO', 'INFO'),
+        ('WARNING', 'WARNING'),
+        ('ERROR', 'ERROR'),
+        ('CRITICAL', 'CRITICAL'),
+    ]
+    
+    COMPONENT_CHOICES = [
+        ('APP', 'APP'),
+        ('NOTIF_SERVICE', 'NOTIF_SERVICE'),
+        ('WORKER', 'WORKER'),
+        ('NETWORK', 'NETWORK'),
+        ('SYSTEM', 'SYSTEM'),
+    ]
+    
+    PIPELINE_STAGE_CHOICES = [
+        ('RECEIVE', 'RECEIVE'),
+        ('STORE', 'STORE'),
+        ('QUEUE', 'QUEUE'),
+        ('SEND', 'SEND'),
+        ('UPLOAD', 'UPLOAD'),
+    ]
+    
+    # Основные поля
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event_id = models.CharField(_('ID события'), max_length=255, unique=True, db_index=True)
+    device = models.ForeignKey(
+        Device, 
+        on_delete=models.CASCADE, 
+        related_name='diagnostic_events',
+        verbose_name=_('Устройство'),
+        db_index=True
+    )
+    timestamp = models.BigIntegerField(_('Время события (UNIX ms)'), db_index=True)
+    
+    # Классификация события
+    event_code = models.CharField(_('Код события'), max_length=100, db_index=True)
+    event_severity = models.CharField(
+        _('Уровень серьезности'), 
+        max_length=20, 
+        choices=SEVERITY_CHOICES,
+        db_index=True
+    )
+    component = models.CharField(
+        _('Компонент'), 
+        max_length=50, 
+        choices=COMPONENT_CHOICES,
+        db_index=True
+    )
+    pipeline_stage = models.CharField(
+        _('Этап пайплайна'), 
+        max_length=50, 
+        choices=PIPELINE_STAGE_CHOICES,
+        null=True, 
+        blank=True,
+        db_index=True
+    )
+    
+    # Контекст и отладка
+    context = models.JSONField(
+        _('Контекст события'), 
+        default=dict, 
+        blank=True,
+        help_text=_('Произвольные дополнительные данные')
+    )
+    thread = models.CharField(_('Поток выполнения'), max_length=255, null=True, blank=True)
+    attempt = models.IntegerField(_('Номер попытки'), null=True, blank=True)
+    flow_id = models.CharField(_('ID потока обработки'), max_length=255, null=True, blank=True, db_index=True)
+    
+    # Снимки состояния (полные JSON объекты)
+    state_snapshot = models.JSONField(
+        _('Снимок состояния устройства'), 
+        null=True, 
+        blank=True,
+        help_text=_('DeviceStateSnapshot - полное состояние устройства на момент события')
+    )
+    metrics_snapshot = models.JSONField(
+        _('Снимок метрик'), 
+        null=True, 
+        blank=True,
+        help_text=_('MetricsSnapshot - метрики производительности на момент события')
+    )
+    
+    # Метаданные
+    created_at = models.DateTimeField(_('Создано'), auto_now_add=True, db_index=True)
+    
+    class Meta:
+        verbose_name = _('Диагностическое событие')
+        verbose_name_plural = _('Диагностические события')
+        ordering = ['-timestamp', '-created_at']
+        indexes = [
+            models.Index(fields=['device', '-timestamp']),
+            models.Index(fields=['event_severity', '-timestamp']),
+            models.Index(fields=['component', '-timestamp']),
+            models.Index(fields=['device', 'event_severity', '-timestamp']),
+        ]
+    
+    def __str__(self):
+        return f"{self.event_code} [{self.event_severity}] - {self.device.name} ({self.get_timestamp_display()})"
+    
+    def get_timestamp_display(self):
+        """Возвращает читаемое представление timestamp"""
+        from datetime import datetime
+        try:
+            dt = datetime.fromtimestamp(self.timestamp / 1000)
+            return dt.strftime('%d.%m.%Y %H:%M:%S')
+        except (ValueError, TypeError):
+            return str(self.timestamp)
+

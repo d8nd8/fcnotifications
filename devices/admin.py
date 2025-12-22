@@ -7,17 +7,19 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib import messages
 from django.shortcuts import redirect
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from datetime import timedelta
 from unfold.admin import ModelAdmin
 from unfold.decorators import action
 from unfold.contrib.filters.admin import (
     RangeDateFilter,
     RelatedDropdownFilter,
+    ChoicesDropdownFilter,
 )
-from .models import Device, Message, TelegramUser, NotificationFilter, AuthToken, LogFile, DeviceStatus
+from .models import Device, Message, TelegramUser, NotificationFilter, AuthToken, LogFile, DeviceStatus, DiagnosticEvent
 import secrets
 import string
+import json
 
 
 def dashboard_callback(request, context):
@@ -594,4 +596,401 @@ class DeviceStatusAdmin(ModelAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('device')
+
+
+@admin.register(DiagnosticEvent)
+class DiagnosticEventAdmin(ModelAdmin):
+    """
+    Админка для диагностических событий с удобным экспортом (django-unfold)
+    """
+    list_display = [
+        'event_code', 
+        'severity_badge', 
+        'component', 
+        'device_link', 
+        'timestamp_display',
+        'pipeline_stage',
+        'created_at'
+    ]
+    list_filter = [
+        ('event_severity', ChoicesDropdownFilter),  # Дропдаун фильтр по уровню серьезности
+        ('component', ChoicesDropdownFilter),  # Дропдаун фильтр по компоненту
+        ('pipeline_stage', ChoicesDropdownFilter),  # Дропдаун фильтр по этапу пайплайна
+        ('created_at', RangeDateFilter),  # Unfold фильтр по дате
+        ('device', RelatedDropdownFilter),  # Unfold дропдаун фильтр по устройству
+    ]
+    search_fields = [
+        'event_code',
+        'event_id',
+        'device__name',
+        'device__token',
+        'thread',
+        'flow_id',
+    ]
+    readonly_fields = [
+        'id',
+        'event_id',
+        'created_at',
+        'state_snapshot_preview',
+        'metrics_snapshot_preview',
+        'context_preview',
+    ]
+    fieldsets = (
+        (_('Основная информация'), {
+            'fields': ('event_id', 'device', 'timestamp', 'created_at')
+        }),
+        (_('Классификация'), {
+            'fields': ('event_code', 'event_severity', 'component', 'pipeline_stage')
+        }),
+        (_('Контекст и отладка'), {
+            'fields': ('context_preview', 'thread', 'attempt', 'flow_id')
+        }),
+        (_('Снимки состояния'), {
+            'fields': ('state_snapshot_preview', 'metrics_snapshot_preview'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    list_per_page = 25
+    list_filter_submit = True  # Кнопка "Применить" для фильтров
+    
+    # Действия для экспорта (стандартные Django actions для работы с выбранными объектами)
+    actions = [
+        'export_to_json_action',
+        'export_error_log_action',
+        'export_device_diagnostics_action',
+        'export_last_10_per_device_action',
+    ]
+    
+    def get_queryset(self, request):
+        """Оптимизация запросов с select_related"""
+        return super().get_queryset(request).select_related('device')
+    
+    def severity_badge(self, obj):
+        """Цветной бейдж для severity"""
+        colors = {
+            'INFO': '#2196F3',  # Синий
+            'WARNING': '#FF9800',  # Оранжевый
+            'ERROR': '#f44336',  # Красный
+            'CRITICAL': '#9C27B0',  # Фиолетовый
+        }
+        color = colors.get(obj.event_severity, '#9e9e9e')
+        return format_html(
+            '<span style="background: {}; color: white; padding: 3px 8px; '
+            'border-radius: 12px; font-size: 11px; font-weight: bold;">{}</span>',
+            color,
+            obj.event_severity
+        )
+    severity_badge.short_description = _('Уровень')
+    
+    def device_link(self, obj):
+        """Ссылка на устройство"""
+        url = reverse('admin:devices_device_change', args=[obj.device.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.device.name)
+    device_link.short_description = _('Устройство')
+    
+    def timestamp_display(self, obj):
+        """Читаемое отображение timestamp"""
+        return obj.get_timestamp_display()
+    timestamp_display.short_description = _('Время события')
+    
+    def state_snapshot_preview(self, obj):
+        """Превью снимка состояния"""
+        if not obj.state_snapshot:
+            return '-'
+        import json
+        return format_html(
+            '<pre style="max-height: 300px; overflow: auto; background: #f5f5f5; padding: 10px; border-radius: 4px;">{}</pre>',
+            json.dumps(obj.state_snapshot, indent=2, ensure_ascii=False)
+        )
+    state_snapshot_preview.short_description = _('Снимок состояния')
+    
+    def metrics_snapshot_preview(self, obj):
+        """Превью снимка метрик"""
+        if not obj.metrics_snapshot:
+            return '-'
+        import json
+        return format_html(
+            '<pre style="max-height: 300px; overflow: auto; background: #f5f5f5; padding: 10px; border-radius: 4px;">{}</pre>',
+            json.dumps(obj.metrics_snapshot, indent=2, ensure_ascii=False)
+        )
+    metrics_snapshot_preview.short_description = _('Снимок метрик')
+    
+    def context_preview(self, obj):
+        """Превью контекста"""
+        if not obj.context:
+            return '-'
+        import json
+        return format_html(
+            '<pre style="max-height: 200px; overflow: auto; background: #f5f5f5; padding: 10px; border-radius: 4px;">{}</pre>',
+            json.dumps(obj.context, indent=2, ensure_ascii=False)
+        )
+    context_preview.short_description = _('Контекст')
+    
+    # Действия экспорта (стандартные Django actions)
+    
+    def export_to_json_action(self, request, queryset):
+        """Экспорт выбранных событий в JSON"""
+        queryset = queryset.select_related('device')
+        
+        events_data = []
+        for event in queryset:
+            events_data.append({
+                'event_id': event.event_id,
+                'device': event.device.name,
+                'device_token': str(event.device.token),
+                'timestamp': event.timestamp,
+                'timestamp_display': event.get_timestamp_display(),
+                'event_code': event.event_code,
+                'event_severity': event.event_severity,
+                'component': event.component,
+                'pipeline_stage': event.pipeline_stage,
+                'thread': event.thread,
+                'attempt': event.attempt,
+                'flow_id': event.flow_id,
+                'context': event.context,
+                'state_snapshot': event.state_snapshot,
+                'metrics_snapshot': event.metrics_snapshot,
+                'created_at': event.created_at.isoformat(),
+            })
+        
+        response = HttpResponse(
+            json.dumps(events_data, indent=2, ensure_ascii=False),
+            content_type='application/json; charset=utf-8'
+        )
+        response['Content-Disposition'] = 'attachment; filename="diagnostic_events.json"'
+        return response
+    export_to_json_action.short_description = _('📄 Экспортировать в JSON')
+    
+    def export_error_log_action(self, request, queryset):
+        """Экспорт ошибок в удобный читаемый лог для разработчика"""
+        queryset = queryset.select_related('device')
+        error_events = queryset.filter(
+            event_severity__in=['ERROR', 'CRITICAL']
+        ).order_by('device', 'timestamp')
+        
+        if not error_events.exists():
+            self.message_user(request, _('Нет ошибок для экспорта среди выбранных событий'), level='warning')
+            return
+        
+        response = HttpResponse(content_type='text/plain; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="error_log.txt"'
+        
+        lines = []
+        lines.append("=" * 80)
+        lines.append("ОТЧЕТ ОБ ОШИБКАХ - ДИАГНОСТИЧЕСКИЕ СОБЫТИЯ")
+        lines.append("=" * 80)
+        lines.append(f"Дата создания: {timezone.now().strftime('%d.%m.%Y %H:%M:%S')}")
+        lines.append(f"Всего ошибок: {error_events.count()}")
+        lines.append("=" * 80)
+        lines.append("")
+        
+        current_device = None
+        for event in error_events:
+            if current_device != event.device:
+                if current_device is not None:
+                    lines.append("")
+                current_device = event.device
+                lines.append(f"\n{'=' * 80}")
+                lines.append(f"УСТРОЙСТВО: {event.device.name} (Token: {event.device.token})")
+                lines.append(f"{'=' * 80}")
+                lines.append("")
+            
+            lines.append(f"[{event.get_timestamp_display()}] {event.event_severity} - {event.event_code}")
+            lines.append(f"  Компонент: {event.component}")
+            if event.pipeline_stage:
+                lines.append(f"  Этап пайплайна: {event.pipeline_stage}")
+            if event.thread:
+                lines.append(f"  Поток: {event.thread}")
+            if event.attempt:
+                lines.append(f"  Попытка: {event.attempt}")
+            if event.flow_id:
+                lines.append(f"  Flow ID: {event.flow_id}")
+            
+            if event.context:
+                lines.append("  Контекст:")
+                for key, value in event.context.items():
+                    lines.append(f"    {key}: {value}")
+            
+            if event.state_snapshot:
+                state = event.state_snapshot
+                lines.append("  Состояние устройства:")
+                if state.get('batteryLevel') is not None:
+                    lines.append(f"    Батарея: {state['batteryLevel']}% {'(заряжается)' if state.get('isCharging') else ''}")
+                if state.get('isNetworkAvailable') is not None:
+                    lines.append(f"    Сеть: {'доступна' if state['isNetworkAvailable'] else 'недоступна'}")
+                if state.get('networkType'):
+                    lines.append(f"    Тип сети: {state['networkType']}")
+                if state.get('serviceRunning') is not None:
+                    lines.append(f"    Сервис: {'запущен' if state['serviceRunning'] else 'остановлен'}")
+                if state.get('workerRunning') is not None:
+                    lines.append(f"    Воркер: {'запущен' if state['workerRunning'] else 'остановлен'}")
+                if state.get('queueSize') is not None:
+                    lines.append(f"    Размер очереди: {state['queueSize']}")
+            
+            if event.metrics_snapshot:
+                metrics = event.metrics_snapshot
+                lines.append("  Метрики:")
+                if metrics.get('totalRetries') is not None:
+                    lines.append(f"    Всего повторных попыток: {metrics['totalRetries']}")
+                if metrics.get('totalServiceRestarts') is not None:
+                    lines.append(f"    Всего перезапусков сервиса: {metrics['totalServiceRestarts']}")
+                if metrics.get('failuresSinceLastRecovery') is not None:
+                    lines.append(f"    Ошибок с последнего восстановления: {metrics['failuresSinceLastRecovery']}")
+            
+            lines.append("")
+            lines.append("-" * 80)
+            lines.append("")
+        
+        response.write("\n".join(lines))
+        return response
+    export_error_log_action.short_description = _('🚨 Экспортировать лог ошибок (только ERROR/CRITICAL)')
+    
+    def export_device_diagnostics_action(self, request, queryset):
+        """Экспорт всех диагностических данных по выбранным устройствам"""
+        queryset = queryset.select_related('device')
+        devices = set(event.device for event in queryset)
+        
+        if not devices:
+            self.message_user(request, _('Нет данных для экспорта'), level='warning')
+            return
+        
+        response = HttpResponse(content_type='text/plain; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="device_diagnostics.txt"'
+        
+        lines = []
+        lines.append("=" * 80)
+        lines.append("ПОЛНЫЙ ОТЧЕТ ПО ДИАГНОСТИКЕ УСТРОЙСТВ")
+        lines.append("=" * 80)
+        lines.append(f"Дата создания: {timezone.now().strftime('%d.%m.%Y %H:%M:%S')}")
+        lines.append(f"Количество устройств: {len(devices)}")
+        lines.append("=" * 80)
+        lines.append("")
+        
+        for device in devices:
+            device_events = queryset.filter(device=device).order_by('timestamp')
+            
+            lines.append(f"\n{'=' * 80}")
+            lines.append(f"УСТРОЙСТВО: {device.name}")
+            lines.append(f"Token: {device.token}")
+            lines.append(f"Последний раз онлайн: {device.last_seen.strftime('%d.%m.%Y %H:%M:%S') if device.last_seen else 'Никогда'}")
+            lines.append(f"Всего событий: {device_events.count()}")
+            lines.append(f"{'=' * 80}")
+            lines.append("")
+            
+            severity_stats = {}
+            for event in device_events:
+                severity_stats[event.event_severity] = severity_stats.get(event.event_severity, 0) + 1
+            
+            if severity_stats:
+                lines.append("Статистика по уровням серьезности:")
+                for severity, count in sorted(severity_stats.items()):
+                    lines.append(f"  {severity}: {count}")
+                lines.append("")
+            
+            component_stats = {}
+            for event in device_events:
+                component_stats[event.component] = component_stats.get(event.component, 0) + 1
+            
+            if component_stats:
+                lines.append("Статистика по компонентам:")
+                for component, count in sorted(component_stats.items()):
+                    lines.append(f"  {component}: {count}")
+                lines.append("")
+            
+            lines.append("Последние события:")
+            for event in device_events[:20]:
+                lines.append(f"  [{event.get_timestamp_display()}] {event.event_severity} - {event.event_code} ({event.component})")
+            
+            if device_events.count() > 20:
+                lines.append(f"  ... и еще {device_events.count() - 20} событий")
+            
+            lines.append("")
+        
+        response.write("\n".join(lines))
+        return response
+    export_device_diagnostics_action.short_description = _('📱 Экспортировать отчет по устройствам')
+    
+    def export_last_10_per_device_action(self, request, queryset):
+        """Экспорт последних 10 событий по каждому устройству"""
+        queryset = queryset.select_related('device')
+        devices = set(event.device for event in queryset)
+        
+        if not devices:
+            self.message_user(request, _('Нет данных для экспорта'), level='warning')
+            return
+        
+        response = HttpResponse(content_type='text/plain; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="last_10_events_per_device.txt"'
+        
+        lines = []
+        lines.append("=" * 80)
+        lines.append("ПОСЛЕДНИЕ 10 СОБЫТИЙ ПО КАЖДОМУ УСТРОЙСТВУ")
+        lines.append("=" * 80)
+        lines.append(f"Дата создания: {timezone.now().strftime('%d.%m.%Y %H:%M:%S')}")
+        lines.append(f"Количество устройств: {len(devices)}")
+        lines.append("=" * 80)
+        lines.append("")
+        
+        for device in devices:
+            # Получаем последние 10 событий для этого устройства из выбранных
+            device_events = queryset.filter(device=device).order_by('-timestamp', '-created_at')[:10]
+            
+            if not device_events.exists():
+                continue
+            
+            lines.append(f"\n{'=' * 80}")
+            lines.append(f"УСТРОЙСТВО: {device.name}")
+            lines.append(f"Token: {device.token}")
+            lines.append(f"Последний раз онлайн: {device.last_seen.strftime('%d.%m.%Y %H:%M:%S') if device.last_seen else 'Никогда'}")
+            lines.append(f"Всего выбрано событий: {queryset.filter(device=device).count()}")
+            lines.append(f"Показано последних: {device_events.count()}")
+            lines.append(f"{'=' * 80}")
+            lines.append("")
+            
+            for idx, event in enumerate(device_events, 1):
+                lines.append(f"[{idx}] {event.get_timestamp_display()} - {event.event_severity} - {event.event_code}")
+                lines.append(f"     Компонент: {event.component}")
+                if event.pipeline_stage:
+                    lines.append(f"     Этап пайплайна: {event.pipeline_stage}")
+                
+                # Краткая информация о состоянии
+                if event.state_snapshot:
+                    state = event.state_snapshot
+                    state_info = []
+                    if state.get('batteryLevel') is not None:
+                        state_info.append(f"Батарея: {state['batteryLevel']}%")
+                    if state.get('isNetworkAvailable') is not None:
+                        state_info.append(f"Сеть: {'✅' if state['isNetworkAvailable'] else '❌'}")
+                    if state.get('serviceRunning') is not None:
+                        state_info.append(f"Сервис: {'✅' if state['serviceRunning'] else '❌'}")
+                    if state_info:
+                        lines.append(f"     Состояние: {', '.join(state_info)}")
+                
+                # Краткая информация о метриках
+                if event.metrics_snapshot:
+                    metrics = event.metrics_snapshot
+                    metrics_info = []
+                    if metrics.get('totalRetries') is not None and metrics['totalRetries'] > 0:
+                        metrics_info.append(f"Retries: {metrics['totalRetries']}")
+                    if metrics.get('totalServiceRestarts') is not None and metrics['totalServiceRestarts'] > 0:
+                        metrics_info.append(f"Restarts: {metrics['totalServiceRestarts']}")
+                    if metrics_info:
+                        lines.append(f"     Метрики: {', '.join(metrics_info)}")
+                
+                # Контекст если есть важная информация
+                if event.context:
+                    important_context = {k: v for k, v in event.context.items() 
+                                       if k in ['errorMessage', 'retryCount', 'exception'] and v}
+                    if important_context:
+                        lines.append(f"     Контекст: {important_context}")
+                
+                lines.append("")
+            
+            lines.append("-" * 80)
+            lines.append("")
+        
+        response.write("\n".join(lines))
+        return response
+    export_last_10_per_device_action.short_description = _('📋 Экспортировать последние 10 событий по каждому устройству')
 

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Device, BatteryReport, Message, LogFile, DeviceStatus
+from .models import Device, BatteryReport, Message, LogFile, DeviceStatus, DiagnosticEvent
 from django.utils import timezone
 from datetime import timedelta
 from drf_yasg import openapi
@@ -151,3 +151,56 @@ class LogFileSerializer(serializers.ModelSerializer):
             if value > now_plus_buffer:
                 raise serializers.ValidationError("Дата создания не может быть в будущем")
         return value
+
+
+class DiagnosticEventSerializer(serializers.Serializer):
+    """
+    Сериализатор для приема диагностических событий
+    """
+    eventId = serializers.CharField(required=True, help_text="Уникальный ID события")
+    deviceId = serializers.UUIDField(required=False, allow_null=True, help_text="ID устройства (опционально, если используется токен)")
+    timestamp = serializers.IntegerField(required=False, allow_null=True, help_text="Время события в миллисекундах UNIX")
+    
+    # Классификация
+    eventCode = serializers.CharField(required=True, help_text="Код события")
+    eventSeverity = serializers.ChoiceField(
+        choices=['INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        required=True,
+        help_text="Уровень серьезности события"
+    )
+    component = serializers.ChoiceField(
+        choices=['APP', 'NOTIF_SERVICE', 'WORKER', 'NETWORK', 'SYSTEM'],
+        required=True,
+        help_text="Компонент системы"
+    )
+    pipelineStage = serializers.ChoiceField(
+        choices=['RECEIVE', 'STORE', 'QUEUE', 'SEND', 'UPLOAD'],
+        required=False,
+        allow_null=True,
+        help_text="Этап пайплайна обработки"
+    )
+    
+    # Контекст
+    context = serializers.DictField(required=False, default=dict, help_text="Произвольные дополнительные данные")
+    thread = serializers.CharField(required=False, allow_null=True, help_text="Имя потока выполнения")
+    attempt = serializers.IntegerField(required=False, allow_null=True, help_text="Номер попытки")
+    flowId = serializers.CharField(required=False, allow_null=True, help_text="ID потока обработки")
+    
+    # Снимки состояния
+    state = serializers.DictField(required=False, allow_null=True, help_text="DeviceStateSnapshot - снимок состояния устройства")
+    metrics = serializers.DictField(required=False, allow_null=True, help_text="MetricsSnapshot - снимок метрик производительности")
+
+
+class DiagnosticsBatchResponseSerializer(serializers.Serializer):
+    """
+    Сериализатор для ответа на пакетную загрузку диагностических событий
+    """
+    success = serializers.BooleanField(help_text="Успешно ли обработан запрос")
+    message = serializers.CharField(help_text="Сообщение о результате")
+    events_processed = serializers.IntegerField(help_text="Количество обработанных событий")
+    events_failed = serializers.IntegerField(help_text="Количество событий с ошибками")
+    errors = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        help_text="Список ошибок при обработке событий"
+    )

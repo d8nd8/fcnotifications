@@ -7,8 +7,8 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.http import JsonResponse
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from .models import Device, BatteryReport, Message, LogFile, DeviceStatus
-from .serializers import DeviceSerializer, MessageSerializer, LogFileSerializer, DeviceStatusSerializer
+from .models import Device, BatteryReport, Message, LogFile, DeviceStatus, DiagnosticEvent
+from .serializers import DeviceSerializer, MessageSerializer, LogFileSerializer, DeviceStatusSerializer, DiagnosticEventSerializer, DiagnosticsBatchResponseSerializer
 from .notifications import notify
 from .notification_filter import NotificationFilterService
 from .status_calculator import DeviceStatusCalculator
@@ -785,3 +785,199 @@ class LogFileView(APIView):
             )
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DiagnosticsBatchView(APIView):
+    """
+    Пакетная загрузка диагностических событий
+    """
+    permission_classes = []  # Без аутентификации, используем токен из запроса
+    
+    @swagger_auto_schema(
+        operation_summary="📊 Загрузить пакет диагностических событий",
+        operation_description="""
+        Принимает пакет диагностических событий от мобильного приложения.
+        
+        **Использование**:
+        - Пакетная отправка множественных диагностических событий
+        - Эффективная передача данных для анализа
+        - Отслеживание последовательности событий
+        
+        **Параметры запроса**:
+        - `token` - токен устройства (обязательно)
+        - `events` - массив событий DiagnosticEvent
+        
+        **Формат события**:
+        - `eventId` - уникальный ID события (обязательно)
+        - `eventCode` - код события (обязательно)
+        - `eventSeverity` - уровень серьезности: INFO, WARNING, ERROR, CRITICAL (обязательно)
+        - `component` - компонент: APP, NOTIF_SERVICE, WORKER, NETWORK, SYSTEM (обязательно)
+        - `pipelineStage` - этап пайплайна: RECEIVE, STORE, QUEUE, SEND, UPLOAD (опционально)
+        - `timestamp` - время события в миллисекундах UNIX (опционально)
+        - `state` - снимок состояния устройства (DeviceStateSnapshot) (опционально)
+        - `metrics` - снимок метрик (MetricsSnapshot) (опционально)
+        - `context` - произвольные дополнительные данные (опционально)
+        - `thread`, `attempt`, `flowId` - данные для отладки (опционально)
+        """,
+        tags=['Диагностика'],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['token', 'events'],
+            properties={
+                'token': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Токен устройства',
+                    example='6f4d3982-2a0c-460b-95d6-7daaaf2b6f39'
+                ),
+                'events': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                    description='Массив диагностических событий',
+                    example=[
+                        {
+                            'eventId': 'evt_1234567890',
+                            'eventCode': 'NETWORK_ERROR',
+                            'eventSeverity': 'ERROR',
+                            'component': 'NETWORK',
+                            'pipelineStage': 'SEND',
+                            'timestamp': 1705327825000,
+                            'state': {'batteryLevel': 85, 'isNetworkAvailable': False},
+                            'metrics': {'totalRetries': 5}
+                        }
+                    ]
+                )
+            }
+        ),
+        responses={
+            200: openapi.Response(
+                description="События успешно обработаны",
+                schema=DiagnosticsBatchResponseSerializer,
+                examples={
+                    "application/json": {
+                        "success": True,
+                        "message": "Обработано 5 событий",
+                        "events_processed": 5,
+                        "events_failed": 0
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Ошибка валидации данных",
+                examples={
+                    "application/json": {
+                        "success": False,
+                        "error": "Неверный формат данных"
+                    }
+                }
+            ),
+            404: openapi.Response(
+                description="Устройство не найдено",
+                examples={
+                    "application/json": {
+                        "success": False,
+                        "error": "Устройство с таким токеном не найдено"
+                    }
+                }
+            )
+        }
+    )
+    def post(self, request):
+        token = request.data.get('token')
+        events_data = request.data.get('events', [])
+        
+        if not token:
+            return Response({
+                'success': False,
+                'error': 'Токен устройства обязателен'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not isinstance(events_data, list):
+            return Response({
+                'success': False,
+                'error': 'Поле events должно быть массивом'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            device = Device.objects.get(token=token)
+        except Device.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Устройство с таким токеном не найдено'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Обрабатываем события
+        events_processed = 0
+        events_failed = 0
+        errors = []
+        
+        for idx, event_data in enumerate(events_data):
+            try:
+                # Валидация события
+                serializer = DiagnosticEventSerializer(data=event_data)
+                if not serializer.is_valid():
+                    events_failed += 1
+                    errors.append({
+                        'index': idx,
+                        'eventId': event_data.get('eventId', 'unknown'),
+                        'errors': serializer.errors
+                    })
+                    continue
+                
+                validated_data = serializer.validated_data
+                
+                # Генерируем timestamp если не указан
+                timestamp = validated_data.get('timestamp')
+                if not timestamp:
+                    timestamp = int(timezone.now().timestamp() * 1000)
+                
+                # Создаем событие
+                DiagnosticEvent.objects.create(
+                    event_id=validated_data['eventId'],
+                    device=device,
+                    timestamp=timestamp,
+                    event_code=validated_data['eventCode'],
+                    event_severity=validated_data['eventSeverity'],
+                    component=validated_data['component'],
+                    pipeline_stage=validated_data.get('pipelineStage'),
+                    context=validated_data.get('context', {}),
+                    thread=validated_data.get('thread'),
+                    attempt=validated_data.get('attempt'),
+                    flow_id=validated_data.get('flowId'),
+                    state_snapshot=validated_data.get('state'),
+                    metrics_snapshot=validated_data.get('metrics'),
+                )
+                
+                events_processed += 1
+                
+            except Exception as e:
+                events_failed += 1
+                errors.append({
+                    'index': idx,
+                    'eventId': event_data.get('eventId', 'unknown'),
+                    'error': str(e)
+                })
+        
+        # Обновляем last_seen устройства
+        device.last_seen = timezone.now()
+        device.save(update_fields=['last_seen'])
+        
+        # Отправляем уведомление если есть CRITICAL события
+        critical_events = [e for e in events_data if e.get('eventSeverity') == 'CRITICAL']
+        if critical_events:
+            from .notifications import notify
+            notification_text = f"🚨 <b>КРИТИЧЕСКОЕ СОБЫТИЕ</b>\n\n"
+            notification_text += f"📱 Устройство: {device.name}\n"
+            notification_text += f"⏰ Время: {timezone.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
+            notification_text += f"📊 Количество критических событий: {len(critical_events)}\n\n"
+            for event in critical_events[:5]:  # Показываем первые 5
+                notification_text += f"• {event.get('eventCode', 'Unknown')} ({event.get('component', 'Unknown')})\n"
+            
+            notify(notification_text)
+        
+        return Response({
+            'success': True,
+            'message': f'Обработано {events_processed} событий',
+            'events_processed': events_processed,
+            'events_failed': events_failed,
+            'errors': errors if errors else None
+        }, status=status.HTTP_200_OK)

@@ -183,6 +183,11 @@ UNFOLD = {
             {
                 "items": [
                     {
+                        "title": "Диагностические события",
+                        "icon": "bug_report",
+                        "link": "/admin/devices/diagnosticevent/",
+                    },
+                    {
                         "title": "Статус устройств",
                         "icon": "analytics",
                         "link": "/admin/devices/devicestatus/",
