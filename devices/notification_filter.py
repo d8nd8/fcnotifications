@@ -123,6 +123,7 @@ class NotificationFilterService:
             r'Чтобы продолжить, подключитесь к Интернету',
             r'Безопасная загрузка проверенных приложений',
             r'This service is running in the foreground',
+            r'Service is running',
             r'Download completed',
             r'Download failed',
             r'System update',

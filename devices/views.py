@@ -4,14 +4,19 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from django.contrib.admin.views.decorators import staff_member_required
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, OperationalError
 from django.http import JsonResponse
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+import logging
 from .models import Device, BatteryReport, Message, LogFile, DeviceStatus, DiagnosticEvent
 from .serializers import DeviceSerializer, MessageSerializer, LogFileSerializer, DeviceStatusSerializer, DiagnosticEventSerializer, DiagnosticsBatchResponseSerializer
 from .notifications import notify
 from .notification_filter import NotificationFilterService
 from .status_calculator import DeviceStatusCalculator
+
+logger = logging.getLogger(__name__)
 
 
 class DeviceView(APIView):
@@ -882,21 +887,30 @@ class DiagnosticsBatchView(APIView):
         }
     )
     def post(self, request):
-        token = request.data.get('token')
-        events_data = request.data.get('events', [])
-        
+        if isinstance(request.data, list):
+            events_data = request.data
+            token = request.META.get('HTTP_X_TOKEN')
+        elif isinstance(request.data, dict):
+            token = request.data.get('token') or request.META.get('HTTP_X_TOKEN')
+            events_data = request.data.get('events', [])
+        else:
+            return Response({
+                'success': False,
+                'error': 'Неверный формат тела запроса'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         if not token:
             return Response({
                 'success': False,
-                'error': 'Токен устройства обязателен'
+                'error': 'Токен устройства обязателен (поле token или заголовок X-TOKEN)'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         if not isinstance(events_data, list):
             return Response({
                 'success': False,
                 'error': 'Поле events должно быть массивом'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         try:
             device = Device.objects.get(token=token)
         except Device.DoesNotExist:
@@ -904,15 +918,27 @@ class DiagnosticsBatchView(APIView):
                 'success': False,
                 'error': 'Устройство с таким токеном не найдено'
             }, status=status.HTTP_404_NOT_FOUND)
-        
-        # Обрабатываем события
+        except (ValidationError, ValueError):
+            return Response({
+                'success': False,
+                'error': 'Неверный формат токена устройства'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         events_processed = 0
         events_failed = 0
         errors = []
-        
+
         for idx, event_data in enumerate(events_data):
+            if not isinstance(event_data, dict):
+                events_failed += 1
+                errors.append({
+                    'index': idx,
+                    'eventId': 'unknown',
+                    'error': 'Событие должно быть объектом'
+                })
+                continue
+
             try:
-                # Валидация события
                 serializer = DiagnosticEventSerializer(data=event_data)
                 if not serializer.is_valid():
                     events_failed += 1
@@ -922,15 +948,13 @@ class DiagnosticsBatchView(APIView):
                         'errors': serializer.errors
                     })
                     continue
-                
+
                 validated_data = serializer.validated_data
-                
-                # Генерируем timestamp если не указан
+
                 timestamp = validated_data.get('timestamp')
                 if not timestamp:
                     timestamp = int(timezone.now().timestamp() * 1000)
-                
-                # Создаем событие
+
                 DiagnosticEvent.objects.create(
                     event_id=validated_data['eventId'],
                     device=device,
@@ -946,9 +970,11 @@ class DiagnosticsBatchView(APIView):
                     state_snapshot=validated_data.get('state'),
                     metrics_snapshot=validated_data.get('metrics'),
                 )
-                
+
                 events_processed += 1
-                
+
+            except IntegrityError:
+                events_processed += 1
             except Exception as e:
                 events_failed += 1
                 errors.append({
@@ -956,24 +982,24 @@ class DiagnosticsBatchView(APIView):
                     'eventId': event_data.get('eventId', 'unknown'),
                     'error': str(e)
                 })
-        
-        # Обновляем last_seen устройства
-        device.last_seen = timezone.now()
-        device.save(update_fields=['last_seen'])
-        
-        # Отправляем уведомление если есть CRITICAL события
-        critical_events = [e for e in events_data if e.get('eventSeverity') == 'CRITICAL']
+
+        try:
+            device.last_seen = timezone.now()
+            device.save(update_fields=['last_seen'])
+        except OperationalError as e:
+            logger.warning('Failed to update device last_seen: %s', e)
+
+        critical_events = [e for e in events_data if isinstance(e, dict) and e.get('eventSeverity') == 'CRITICAL']
         if critical_events:
-            from .notifications import notify
             notification_text = f"🚨 <b>КРИТИЧЕСКОЕ СОБЫТИЕ</b>\n\n"
             notification_text += f"📱 Устройство: {device.name}\n"
             notification_text += f"⏰ Время: {timezone.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
             notification_text += f"📊 Количество критических событий: {len(critical_events)}\n\n"
-            for event in critical_events[:5]:  # Показываем первые 5
+            for event in critical_events[:5]:
                 notification_text += f"• {event.get('eventCode', 'Unknown')} ({event.get('component', 'Unknown')})\n"
-            
+
             notify(notification_text)
-        
+
         return Response({
             'success': True,
             'message': f'Обработано {events_processed} событий',
