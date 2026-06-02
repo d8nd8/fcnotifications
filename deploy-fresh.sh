@@ -2,8 +2,10 @@
 #
 # FC Phones — деплой на чистый VPS (только IP, без домена)
 #
-# Использование:
+# Использование (из папки проекта, где лежит manage.py):
+#   cd /opt/fc_phones/fcnotifications
 #   sudo ./deploy-fresh.sh --ip 203.0.113.10
+#
 #   sudo ./deploy-fresh.sh --ip 203.0.113.10 \
 #       --telegram-token "123:ABC" \
 #       --telegram-chat-id "6513088849" \
@@ -12,8 +14,8 @@
 #
 # Опции:
 #   --ip                  Публичный IP сервера (обязательно)
-#   --project-dir         Путь к проекту (по умолчанию: /opt/fc_phones)
-#   --git-repo            URL git-репозитория (если проект ещё не на сервере)
+#   --project-dir         Путь к проекту (по умолчанию: папка со скриптом)
+#   --git-repo            URL git-репозитория (если manage.py ещё нет)
 #   --telegram-token      TELEGRAM_BOT_TOKEN
 #   --telegram-chat-id    TELEGRAM_ADMIN_CHAT_ID
 #   --admin-user          Логин Django admin (по умолчанию: admin)
@@ -35,8 +37,10 @@ ok()    { echo -e "${GREEN}[OK]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 fail()  { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 SERVER_IP=""
-PROJECT_DIR="/opt/fc_phones"
+PROJECT_DIR=""
 GIT_REPO=""
 TELEGRAM_TOKEN=""
 TELEGRAM_CHAT_ID=""
@@ -64,6 +68,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -z "$PROJECT_DIR" ]]; then
+    if [[ -f "$SCRIPT_DIR/manage.py" ]]; then
+        PROJECT_DIR="$SCRIPT_DIR"
+    else
+        PROJECT_DIR="/opt/fc_phones"
+    fi
+fi
+
 [[ "$EUID" -eq 0 ]] || fail "Запускайте от root: sudo $0 --ip YOUR_IP"
 
 if [[ -z "$SERVER_IP" ]]; then
@@ -77,6 +89,7 @@ VENV="$PROJECT_DIR/venv"
 GUNICORN_WORKERS=3
 
 log "=== FC Phones: деплой на $SERVER_IP ==="
+log "Директория проекта: $PROJECT_DIR"
 
 log "Обновление системы..."
 export DEBIAN_FRONTEND=noninteractive
@@ -99,7 +112,6 @@ fi
 
 log "Подготовка директории проекта..."
 mkdir -p "$PROJECT_DIR"
-chown "$SERVICE_USER:$SERVICE_USER" "$PROJECT_DIR"
 
 if [[ -f "$PROJECT_DIR/manage.py" ]]; then
     ok "Проект найден в $PROJECT_DIR"
@@ -107,14 +119,19 @@ elif [[ -n "$GIT_REPO" ]]; then
     log "Клонирование $GIT_REPO ..."
     if [[ -d "$PROJECT_DIR/.git" ]]; then
         sudo -u "$SERVICE_USER" git -C "$PROJECT_DIR" pull
-    else
+    elif [[ -z "$(ls -A "$PROJECT_DIR" 2>/dev/null)" ]]; then
         sudo -u "$SERVICE_USER" git clone "$GIT_REPO" "$PROJECT_DIR"
+    else
+        fail "Директория $PROJECT_DIR не пуста и manage.py не найден"
     fi
 else
-    fail "Проект не найден в $PROJECT_DIR. Скопируйте файлы (scp/rsync) или укажите --git-repo"
+    fail "manage.py не найден в $PROJECT_DIR. Склонируйте репозиторий или укажите --git-repo"
 fi
 
 [[ -f "$PROJECT_DIR/manage.py" ]] || fail "manage.py не найден — проверьте PROJECT_DIR"
+
+chown -R "$SERVICE_USER:$SERVICE_USER" "$PROJECT_DIR"
+ok "Права на проект: $SERVICE_USER"
 
 log "Python venv и зависимости..."
 if [[ ! -d "$VENV" ]]; then
