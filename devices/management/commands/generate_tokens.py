@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from devices.models import TelegramUser
+from devices.models import AuthToken
 import secrets
 import string
 
@@ -24,41 +24,30 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         count = options['count']
         length = options['length']
-        
+
         self.stdout.write(f'Генерация {count} токенов длиной {length} символов...')
-        
+
         created_count = 0
-        
-        for i in range(count):
-            # Генерируем уникальный токен
+
+        for _ in range(count):
             while True:
-                token = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(length))
-                
-                # Проверяем, что токен уникален
-                if not TelegramUser.objects.filter(token=token).exists():
+                token = ''.join(
+                    secrets.choice(string.ascii_uppercase + string.digits)
+                    for _ in range(length)
+                )
+                if not AuthToken.objects.filter(token=token).exists():
                     break
-            
-            # Создаем токен без привязки к пользователю
-            # Используем отрицательный ID для токенов, чтобы избежать конфликтов
-            TelegramUser.objects.create(
-                user_id=-(i+1),  # Отрицательный ID для токенов
-                username=None,  # Без username
-                first_name=None,  # Без имени
-                last_name=None,  # Без фамилии
-                token=token,
-                is_active=False  # Токен неактивен до использования
-            )
-            
+
+            AuthToken.objects.create(token=token)
             created_count += 1
             self.stdout.write(f'  Создан токен: {token}')
-        
+
         self.stdout.write(
             self.style.SUCCESS(f'\nСоздано {created_count} токенов')
         )
-        
-        # Показываем статистику
-        total_tokens = TelegramUser.objects.filter(is_active=False).count()
-        used_tokens = TelegramUser.objects.filter(is_active=True).count()
-        
-        self.stdout.write(f'Всего неиспользованных токенов: {total_tokens}')
-        self.stdout.write(f'Использованных токенов: {used_tokens}')
+
+        unused = AuthToken.objects.filter(is_used=False).count()
+        used = AuthToken.objects.filter(is_used=True).count()
+
+        self.stdout.write(f'Всего неиспользованных токенов: {unused}')
+        self.stdout.write(f'Использованных токенов: {used}')

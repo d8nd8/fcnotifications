@@ -22,6 +22,7 @@
 #   --admin-password      Пароль Django admin (если не указан — спросит)
 #   --skip-test-device    Не создавать тестовое устройство
 #   --skip-bot-tokens     Не генерировать токены для Telegram-бота
+#   --skip-firewall       Не включать UFW (если SSH на нестандартном порту)
 #
 
 set -euo pipefail
@@ -48,6 +49,7 @@ ADMIN_USER="admin"
 ADMIN_PASSWORD=""
 SKIP_TEST_DEVICE=false
 SKIP_BOT_TOKENS=false
+SKIP_FIREWALL=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -60,6 +62,7 @@ while [[ $# -gt 0 ]]; do
         --admin-password)     ADMIN_PASSWORD="$2"; shift 2 ;;
         --skip-test-device)   SKIP_TEST_DEVICE=true; shift ;;
         --skip-bot-tokens)    SKIP_BOT_TOKENS=true; shift ;;
+        --skip-firewall)      SKIP_FIREWALL=true; shift ;;
         -h|--help)
             sed -n '2,22p' "$0"
             exit 0
@@ -284,10 +287,22 @@ rm -f /etc/nginx/sites-enabled/default
 
 nginx -t
 
-log "Firewall..."
-ufw allow OpenSSH
-ufw allow 80/tcp
-ufw --force enable
+if [[ "$SKIP_FIREWALL" == false ]]; then
+    log "Firewall..."
+    mapfile -t SSH_PORTS < <(ss -tlnp 2>/dev/null | grep sshd | grep -oE ':[0-9]+' | tr -d ':' | sort -u)
+    if [[ ${#SSH_PORTS[@]} -eq 0 ]]; then
+        port=$(grep -E '^[[:space:]]*Port[[:space:]]+' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | tail -1)
+        [[ -n "$port" ]] && SSH_PORTS=("$port") || SSH_PORTS=("22")
+    fi
+    for port in "${SSH_PORTS[@]}"; do
+        ufw allow "${port}/tcp"
+        ok "UFW: разрешён SSH порт ${port}"
+    done
+    ufw allow 80/tcp
+    ufw --force enable
+else
+    warn "UFW пропущен (--skip-firewall)"
+fi
 
 log "Запуск сервисов..."
 systemctl daemon-reload

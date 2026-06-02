@@ -55,7 +55,7 @@ class SimpleTelegramBot:
             logger.error(f"Error getting updates: {e}")
             return None
     
-    def send_message(self, chat_id, text, parse_mode='Markdown'):
+    def send_message(self, chat_id, text, parse_mode='HTML'):
         """Send message to chat."""
         try:
             url = f"{self.base_url}/sendMessage"
@@ -67,6 +67,10 @@ class SimpleTelegramBot:
             response = requests.post(url, data=data, timeout=10)
             response.raise_for_status()
             return True
+        except requests.exceptions.HTTPError as e:
+            body = e.response.text if e.response is not None else ''
+            logger.error(f"Error sending message: {e} {body}")
+            return False
         except Exception as e:
             logger.error(f"Error sending message: {e}")
             return False
@@ -95,10 +99,10 @@ class SimpleTelegramBot:
             # Проверяем авторизацию через AuthToken
             if not AuthToken.objects.filter(used_by=telegram_user, is_used=True).exists():
                 message = (
-                    f'🔐 **Авторизация требуется**\n\n'
+                    f'🔐 <b>Авторизация требуется</b>\n\n'
                     f'Для использования бота необходимо ввести токен авторизации.\n\n'
                     f'Используйте команду:\n'
-                    f'/auth <ваш_токен>\n\n'
+                    f'/auth &lt;ваш_токен&gt;\n\n'
                     f'Токен можно получить у администратора.'
                 )
             else:
@@ -106,7 +110,7 @@ class SimpleTelegramBot:
                 telegram_user.save()
                 
                 message = (
-                    f'🤖 **Сервис Алертов FC Phones**\n\n'
+                    f'🤖 <b>Сервис Алертов FC Phones</b>\n\n'
                     f'✅ Вы авторизованы и подписаны на уведомления!\n\n'
                     'Доступные команды:\n'
                     '/start - Показать это сообщение\n'
@@ -178,13 +182,13 @@ class SimpleTelegramBot:
         """Handle /help command."""
         chat_id = update['message']['chat']['id']
         message = (
-            '**Доступные команды:**\n\n'
+            '<b>Доступные команды:</b>\n\n'
             '/start - Показать приветственное сообщение\n'
-            '/auth <токен> - Авторизация в боте\n'
+            '/auth &lt;токен&gt; - Авторизация в боте\n'
             '/devices - Список всех устройств\n'
             '/test - Отправить тестовое уведомление\n'
             '/help - Показать эту справку\n\n'
-            '**О сервисе:**\n'
+            '<b>О сервисе:</b>\n'
             'Этот бот уведомляет о новых сообщениях от ваших устройств. '
             'Каждое сообщение будет приходить с информацией об устройстве, времени и отправителе.'
         )
@@ -207,12 +211,12 @@ class SimpleTelegramBot:
                 self.send_message(chat_id, '❌ Устройства не найдены.')
                 return
             
-            message = '📱 **Список устройств:**\n\n'
+            message = '📱 <b>Список устройств:</b>\n\n'
             for device in devices:
                 last_seen = device.last_seen.strftime('%d.%m.%Y %H:%M:%S') if device.last_seen else 'Никогда'
                 status = '🟢 Онлайн' if device.last_seen else '🔴 Офлайн'
-                message += f'• **{device.name}** {status}\n'
-                message += f'  Токен: `{device.token}`\n'
+                message += f'• <b>{device.name}</b> {status}\n'
+                message += f'  Токен: <code>{device.token}</code>\n'
                 message += f'  Последняя активность: {last_seen}\n\n'
             
             self.send_message(chat_id, message)
